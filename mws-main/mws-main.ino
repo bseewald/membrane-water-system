@@ -21,6 +21,7 @@
 #include <Ezo_i2c.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <HardwareSerial.h>
 #include "esp_http_client.h"
 
 // ---------------------------------------------
@@ -45,13 +46,25 @@ const char* password = "******";
 // ---------------------------------------------
 // Server URL
 // ---------------------------------------------
+#define RETRY 3
+#define ERROR 404
+bool send_again = false;
+
 const char *post_url = "http://your-webserver.net/yourscript.php";
 
 // ---------------------------------------------
 // Ph and EC - I2C address
 // ---------------------------------------------
-// Ezo_board PH = Ezo_board(99, "PH");
-// Ezo_board EC = Ezo_board(100, "EC");
+// Ezo_board ph = Ezo_board(99, "PH");
+// Ezo_board ec = Ezo_board(100, "EC");
+
+// ---------------------------------------------
+// UART 2 PINS
+// ---------------------------------------------
+#define RXD2 16
+#define TXD2 17
+
+HardwareSerial serial_balance(2);
 
 // ---------------------------------------------
 // DS18B20 Temperature Sensor
@@ -82,6 +95,16 @@ void setup()
   Serial.begin(115200);
   delay(10);
 
+  // Balance
+  serial_balance.begin(9600, SERIAL_8N1, RXD2, TXD2);
+  delay(10);
+
+  // Temp
+  temp_sensors.begin();
+
+  // I2C
+  // Wire.begin();
+
   // WiFi network
   while (!Serial) ;
   DEBUG_PRINT("Connecting to ");
@@ -92,29 +115,34 @@ void setup()
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
   }
-
   DEBUG_PRINTLN("WiFi connected");
   DEBUG_PRINTLN("IP address: ");
   DEBUG_PRINTLN(WiFi.localIP());
-
-  // Temp
-  temp_sensors.begin();
-  // I2C
-  // Wire.begin();
 }
 
 void loop()
 {
   String values = "";
+  int response = ERROR;
 
+  // ---------------------------------------------
   // Collect info from sensors
+  // ---------------------------------------------
   switch(current_step) {
     case REQUEST:
       if (millis() >= next_poll_time) {
-        // Send the command to get temperature, pH and EC values
+
+        // --------------------------------------------------------------
+        // Send the command to get balance, temperature, pH and EC values
+        // --------------------------------------------------------------
         temp_sensors.requestTemperatures();
-        // PH.send_read_cmd();
-        // EC.send_read_cmd();
+
+        // ph.send_read_cmd();
+        // ec.send_read_cmd();
+
+        // TODO: PRINT<CR> ... The same operation as pressing the [PRINT] key
+        char command[] = "PRINT\r";
+        serial_balance.write((uint8_t *)command, sizeof(command));
 
         // Set when the response will arrive
         next_poll_time = millis() + reading_delay;
@@ -124,12 +152,24 @@ void loop()
 
     case READ:
       if (millis() >= next_poll_time) {
-        // Read temperature, pH and EC
+
+        // ---------------------------------------------
+        // Read balance, temperature, pH and EC
+        // ---------------------------------------------
+
+        // TODO: Read balance info
+        String weighing = "";
+        while(serial_balance.available() > 0) {
+          uint8_t byteFromSerial = serial_balance.read();
+          weighing += (char*)byteFromSerial;
+        }
+        DEBUG_PRINT("WEIGHING: "); DEBUG_PRINTLN(weighing);
+        //TODO: put value in URL API
+
         int feed = temp_sensors.getTempC(temp_sensor_feed);
         int permeate = temp_sensors.getTempC(temp_sensor_permeate);
-        DEBUG_PRINT("FEED: "); DEBUG_PRINTLN(feed);
-        DEBUG_PRINT("PERMEATE: "); DEBUG_PRINTLN(permeate);
-        //TODO: put value in URL API
+        DEBUG_PRINT("TEMP FEED: "); DEBUG_PRINTLN(feed);
+        DEBUG_PRINT("TEMP PERMEATE: "); DEBUG_PRINTLN(permeate);
         values += "tempfeed=" + String(feed) + "&temppermeate=" + String(permeate);
 
         // PH.receive_read_cmd();
@@ -137,7 +177,6 @@ void loop()
 
         // if(reading_succeeded(PH) == true){                     // if the pH reading has been received and it is valid
         //   DEBUG_PRINTLN(PH.get_last_received_reading(), 2);
-        //   //TODO: put value in URL API
         //   values += "&ph=" + String(PH.get_last_received_reading(), 2);
         // }
 
@@ -146,17 +185,31 @@ void loop()
 
         // if(reading_succeeded(EC) == true){                    // if the EC reading has been received and it is valid
         //   DEBUG_PRINTLN(EC.get_last_received_reading(), 0);
-        //   //TODO: put value in URL API
         //   values += "&ec=" + String(EC.get_last_received_reading(), 2);
         // }
 
         // Next collect: +5 min
         next_poll_time =  millis() + loop_delay;              // update the time for the next reading loop
         current_step = REQUEST;
+
+        // ---------------------------------------------
+        // Send URL to server
+        // ---------------------------------------------
+        DEBUG_PRINTLN(values);
+        int i = 0;
+        while(i < RETRY){
+          response = post_data_server(values.c_str());
+          DEBUG_PRINTLN(response);
+          if(response == 200)
+            break;
+          i++;
+        }
+        if(response != 200){
+          // TODO: save in memory and try again next time
+          DEBUG_PRINTLN("SAVE IN FLASH");
+          send_again = true;
+        }
       }
-      // TODO: send URL to a server
-      DEBUG_PRINTLN(values);
-      post_data_server(values.c_str());
       break;
   }
 }
@@ -221,8 +274,9 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt)
   return ESP_OK;
 }
 
-static esp_err_t post_data_server(const char *post_data)
+int post_data_server(const char *post_data)
 {
+  int response = 404;
   esp_err_t res = ESP_OK;
   esp_http_client_handle_t http_client;
   esp_http_client_config_t config_client = {0};
@@ -239,6 +293,8 @@ static esp_err_t post_data_server(const char *post_data)
   if (err == res) {
     DEBUG_PRINT("esp_http_client_get_status_code: ");
     DEBUG_PRINTLN(esp_http_client_get_status_code(http_client));
+    response = 200;
   }
   esp_http_client_cleanup(http_client);
+  return response;
 }
