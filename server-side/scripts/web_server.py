@@ -16,27 +16,14 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from csv import DictWriter
 from pathlib import Path
 from datetime import date
+import logging
 
+PATH="****"
 
 class S(BaseHTTPRequestHandler):
     def _set_headers(self):
         self.send_response(200)
-        # self.send_header("Content-type", "text/html")
         self.end_headers()
-
-    # def _html(self, message):
-    #     """This just generates an HTML document that includes `message`
-    #     in the body. Override, or re-write this do do more interesting stuff.
-    #     """
-    #     content = f"<ht   ml><body><h1>{message}</h1></body></html>"
-    #     return content.encode("utf8")  # NOTE: must return a bytes object!
-
-    # def do_GET(self):
-    #     self._set_headers()
-    #     self.wfile.write(self._html("hi!"))
-
-    # def do_HEAD(self):
-    #     self._set_headers()
 
     def do_POST(self):
         self._set_headers()
@@ -46,7 +33,7 @@ class S(BaseHTTPRequestHandler):
 
             # write in csv file (weighing=1&feed=2&permeate=3&ph=4&ec=5)
             field_names = ['weighing', 'feed', 'permeate', 'ph', 'ec']
-            filename = "csv-files/" + str(date.today()) + ".csv"
+            filename = PATH + "csv-files/" + str(date.today()) + ".csv"
             if Path(filename).is_file():
                 with open(filename, 'a+', newline='') as write_obj:
                     writer = DictWriter(write_obj, fieldnames=field_names)
@@ -56,14 +43,26 @@ class S(BaseHTTPRequestHandler):
                     writer = DictWriter(write_obj, fieldnames=field_names)
                     writer.writeheader()
                     writer.writerow(_sensors)
+            logging.info("%s - - [%s] %s" % (self.address_string(),
+                                                self.log_date_time_string(),
+                                                'Sensors values saved in csv file'))
+        else:
+            logging.info("%s - - [%s] %s" % (self.address_string(),
+                                                self.log_date_time_string(),
+                                                'Something went wrong'))
+
 
 
 def run(server_class=HTTPServer, handler_class=S, addr="localhost", port=8000):
-    server_address = (addr, port)
-    httpd = server_class(server_address, handler_class)
-
-    print(f"Starting httpd server on {addr}:{port}")
-    httpd.serve_forever()
+    try:
+        logging.basicConfig(filename=PATH+ "log/sensors.log", level=logging.INFO)
+        server_address = (addr, port)
+        httpd = server_class(server_address, handler_class)
+        print(f"Starting httpd server on {addr}:{port}")
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print('^C received, shutting down the web server')
+        server.socket.close()
 
 
 if __name__ == "__main__":
