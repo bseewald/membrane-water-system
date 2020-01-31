@@ -31,16 +31,16 @@ class S(BaseHTTPRequestHandler):
             sensors = dict(urllib.parse.parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode('ascii')))
             _sensors = {key: value[0] for key, value in sensors.items()}
 
-            # write in csv file (weighing=1&feed=2&permeate=3&ph=4&ec=5)
-            field_names = ['weighing', 'feed', 'permeate', 'ph', 'ec']
+            # write in csv file (time=0&weighing=1&feed=2&permeate=3&ph=4&ec=5)
+            field_names = ['time', 'weighing', 'feed', 'permeate', 'ph', 'ec']
             filename = PATH + "csv-files/" + str(date.today()) + ".csv"
             if Path(filename).is_file():
-                with open(filename, 'a+', newline='') as write_obj:
-                    writer = DictWriter(write_obj, fieldnames=field_names)
+                with open(filename, 'a+', newline='') as data:
+                    writer = DictWriter(data, fieldnames=field_names)
                     writer.writerow(_sensors)
             else:
-                with open(filename, 'w', newline='') as write_obj:
-                    writer = DictWriter(write_obj, fieldnames=field_names)
+                with open(filename, 'w', newline='') as data:
+                    writer = DictWriter(data, fieldnames=field_names)
                     writer.writeheader()
                     writer.writerow(_sensors)
             logging.info("%s - - [%s] %s" % (self.address_string(),

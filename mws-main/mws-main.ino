@@ -23,6 +23,9 @@
 #include <DallasTemperature.h>
 #include <HardwareSerial.h>
 #include "esp_http_client.h"
+#include <EEPROM.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 // ---------------------------------------------
 // Debug options
@@ -40,13 +43,14 @@
 // ---------------------------------------------
 // Wifi credentials
 // ---------------------------------------------
+#define WIFI_RETRY 30
 const char* ssid     = "PROJETOAUTOFL";
 const char* password = "******";
 
 // ---------------------------------------------
 // Server URL
 // ---------------------------------------------
-#define RETRY 3
+#define SERVER_RETRY 3
 #define ERROR 404
 bool send_again = false;
 
@@ -76,6 +80,21 @@ DeviceAddress temp_sensor_feed = { 0x28, 0x92, 0x98, 0x79, 0x97, 0x7, 0x3, 0xAD 
 DeviceAddress temp_sensor_permeate = { 0x28, 0x26, 0x2B, 0x79, 0x97, 0x2, 0x3, 0x88 };
 
 // ---------------------------------------------
+// EEPROM Mem Map
+// ---------------------------------------------
+#define EEPROM_SIZE 6
+
+
+
+// ---------------------------------------------
+// NTP
+// ---------------------------------------------
+WiFiUDP ntpUDP;
+NTPClient time_client(ntpUDP);
+String formatted_date;
+String time_stamp;
+
+// ---------------------------------------------
 // Variables
 // ---------------------------------------------
 enum reading_step {REQUEST, READ};
@@ -83,10 +102,11 @@ enum reading_step current_step = REQUEST;
 
 int return_code = 0;
 unsigned long next_poll_time = 0;
+unsigned long check_wifi = 60000;
 
 const unsigned long reading_delay = 1000;     // how long we wait to receive a response, in milliseconds
-// const unsigned long loop_delay = 300000;      // collect loop time: 5min
-const unsigned long loop_delay = 15000;
+const unsigned long loop_delay = 300000;      // collect loop time: 5min
+const unsigned long retry_delay = 15000;
 
 
 void setup()
@@ -105,19 +125,31 @@ void setup()
   // I2C
   // Wire.begin();
 
+  EEPROM.begin(EEPROM_SIZE);
+
   // WiFi network
-  while (!Serial) ;
+  while(!Serial);
   DEBUG_PRINT("Connecting to ");
   DEBUG_PRINTLN(ssid);
 
   WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+  int i=0;
+  while(WiFi.status() != WL_CONNECTED && i++<=WIFI_RETRY)
+  {
+    delay(1000);
+    i=i+1;
+    if(i > WIFI_RETRY){
+      DEBUG_PRINTLN("Problem with wifi. Restarting .....");
+      ESP.restart();
+    }
   }
-  DEBUG_PRINTLN("WiFi connected");
-  DEBUG_PRINTLN("IP address: ");
-  DEBUG_PRINTLN(WiFi.localIP());
+  DEBUG_PRINTLN("WiFi connected"); DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(WiFi.localIP());
+
+  // Initialize a NTPClient to get time
+  time_client.begin();
+  // Set offset time in seconds to adjust for your timezone, for example:
+  // GMT +1 = 3600 / GMT -1 = -3600
+  time_client.setTimeOffset(-10800);
 }
 
 void loop()
@@ -125,12 +157,20 @@ void loop()
   String values = "";
   int response = ERROR;
 
+  if((WiFi.status() != WL_CONNECTED) && (millis() > check_wifi)) {
+    DEBUG_PRINTLN("Reconnecting to WiFi...");
+    WiFi.disconnect();
+    WiFi.begin(ssid, password);
+    check_wifi = millis() + 60000;
+    DEBUG_PRINTLN("WiFi connected"); DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(WiFi.localIP());
+  }
+
   // ---------------------------------------------
   // Collect info from sensors
   // ---------------------------------------------
   switch(current_step) {
     case REQUEST:
-      if (millis() >= next_poll_time) {
+      if (millis() >= next_poll_time){
 
         // --------------------------------------------------------------
         // Send the command to get balance, temperature, pH and EC values
@@ -154,23 +194,24 @@ void loop()
       if (millis() >= next_poll_time) {
 
         // ---------------------------------------------
-        // Read balance, temperature, pH and EC
+        // Read balance, temperature, pH and EC values
         // ---------------------------------------------
+        values += "time=" + get_time_stamp();
 
         // TODO: Read balance info
         String weighing = "";
         while(serial_balance.available() > 0) {
-          uint8_t byteFromSerial = serial_balance.read();
-          weighing += (char*)byteFromSerial;
+          uint8_t byte_from_serial = serial_balance.read();
+          weighing += (char*)byte_from_serial;
         }
         DEBUG_PRINT("WEIGHING: "); DEBUG_PRINTLN(weighing);
-        //TODO: put value in URL API
+        // values += "&weighing=" + weighing;
 
-        int feed = temp_sensors.getTempC(temp_sensor_feed);
-        int permeate = temp_sensors.getTempC(temp_sensor_permeate);
+        float feed = temp_sensors.getTempC(temp_sensor_feed);
+        float permeate = temp_sensors.getTempC(temp_sensor_permeate);
         DEBUG_PRINT("TEMP FEED: "); DEBUG_PRINTLN(feed);
         DEBUG_PRINT("TEMP PERMEATE: "); DEBUG_PRINTLN(permeate);
-        values += "tempfeed=" + String(feed) + "&temppermeate=" + String(permeate);
+        values += "&feed=" + String(feed) + "&permeate=" + String(permeate);
 
         // PH.receive_read_cmd();
         // DEBUG_PRINT(PH.get_name()); DEBUG_PRINT(": ");
@@ -197,16 +238,19 @@ void loop()
         // ---------------------------------------------
         DEBUG_PRINTLN(values);
         int i = 0;
-        while(i < RETRY){
+        while(i < SERVER_RETRY){
           response = post_data_server(values.c_str());
           DEBUG_PRINTLN(response);
           if(response == 200)
             break;
           i++;
+          delay(retry_delay);
         }
         if(response != 200){
           // TODO: save in memory and try again next time
           DEBUG_PRINTLN("SAVE IN FLASH");
+          // EEPROM.write(0, ledState);
+          // EEPROM.commit();
           send_again = true;
         }
       }
@@ -291,10 +335,25 @@ int post_data_server(const char *post_data)
 
   esp_err_t err = esp_http_client_perform(http_client);
   if (err == res) {
-    DEBUG_PRINT("esp_http_client_get_status_code: ");
-    DEBUG_PRINTLN(esp_http_client_get_status_code(http_client));
     response = 200;
   }
+  DEBUG_PRINT("esp_http_client_get_status_code: ");
+  DEBUG_PRINTLN(esp_http_client_get_status_code(http_client));
+
   esp_http_client_cleanup(http_client);
   return response;
+}
+
+String get_time_stamp(){
+  while(!time_client.update()) {
+    time_client.forceUpdate();
+  }
+  // The formatted_date comes with the following format:
+  // 2018-05-28T16:00:13Z
+  // We need to extract date and time
+  formatted_date = time_client.getFormattedDate();
+  int split = formatted_date.indexOf("T");
+  time_stamp = formatted_date.substring(split+1, formatted_date.length()-1);
+  DEBUG_PRINT("HOUR: "); DEBUG_PRINTLN(time_stamp);
+  return time_stamp;
 }
