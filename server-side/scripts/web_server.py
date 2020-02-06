@@ -18,7 +18,7 @@ from pathlib import Path
 from datetime import date
 import logging
 
-PATH="****"
+PATH="/home/mdautomatizada/server-side/"
 
 class S(BaseHTTPRequestHandler):
     def _set_headers(self):
