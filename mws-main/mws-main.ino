@@ -55,7 +55,6 @@ const char* password = "2020projetoautoFL";
 #define SERVER_RETRY 3
 #define ERROR 404
 bool send_again = false;
-
 const char *post_url = "http://13.68.215.66:58721";
 
 // ---------------------------------------------
@@ -174,7 +173,12 @@ void loop()
   // ---------------------------------------------
   // Send files to email (if necessary)
   // ---------------------------------------------
-  send_email();
+  formatted_date = time_client.getFormattedDate();
+  int currentHour = time_client.getHours();
+  int currentMin = time_client.getMinutes();
+  if(send_again && (currentHour == 23) && (currentMin > 50)){
+    send_email();
+  }
 
   // ---------------------------------------------
   // Collect info from sensors
@@ -358,7 +362,7 @@ void save_in_file(String _time, String _weight, String _feed, String _permeate, 
     DEBUG_PRINTLN("There was an error opening the file for writing");
   }
   // _time,_weight,_feed,_permeate,_ph,_ec
-  String _values = _time + "," + _weight + "," + _feed + "," + _permeate + "," + _ph + "," + _ec;
+  String _values = _time + "," + _weight + "," + _feed + "," + _permeate + "," + _ph + "," + _ec + "\n";
   if(file.print(_values)) {
     DEBUG_PRINTLN("File was written");
   }
@@ -368,7 +372,7 @@ void save_in_file(String _time, String _weight, String _feed, String _permeate, 
 }
 
 String get_time_stamp(){
-  while(!time_client.update()) {
+  if(!time_client.update()) {
     time_client.forceUpdate();
   }
   // The formatted_date comes with the following format:
@@ -382,7 +386,7 @@ String get_time_stamp(){
 }
 
 String get_date_stamp(){
-  while(!time_client.update()) {
+  if(!time_client.update()) {
     time_client.forceUpdate();
   }
   formatted_date = time_client.getFormattedDate();
@@ -395,61 +399,54 @@ String get_date_stamp(){
 //Callback function to get the Email sending status
 void send_callback(SendStatus msg){
   DEBUG_PRINTLN(msg.info());
-  // if(msg.success()){
-  //   DEBUG_PRINTLN("----------------");
-  // }
 }
 
 void send_email(){
-  while(!time_client.update()) {
-    time_client.forceUpdate();
+  // Send email with all files (after 23h00)
+  DEBUG_PRINTLN("Sending email...");
+  // smtp_data.setDebug(true);
+  smtp_data.setLogin("smtp.gmail.com", 465, "mdautomatizada", "2020ProjetoMDautomatizada");
+  smtp_data.setSender("ESP32", "mdautomatizada@gmail.com");
+  //Set Email priority or importance High, Normal, Low or 1 to 5 (1 is highest)
+  smtp_data.setPriority("High");
+  smtp_data.setSubject("ESP32 Mail Sending");
+  smtp_data.setMessage("<div style=\"color:#ff0000;font-size:12px;\">Saved values - From ESP32</div>", true);
+  smtp_data.addRecipient("mdautomatizada@gmail.com");
+  smtp_data.setFileStorageType(MailClientStorageType::SPIFFS);
+
+  // Attach all files
+  File root = SPIFFS.open("/");
+  File file = root.openNextFile();
+  String path = "";
+  while(file){
+    path = file.name();
+    DEBUG_PRINT("FILE: "); DEBUG_PRINTLN(path);
+    smtp_data.addAttachFile(path);
+    file = root.openNextFile();
   }
-  formatted_date = time_client.getFormattedDate();
-  int currentHour = time_client.getHours();
-  int currentMin = time_client.getMinutes();
+  smtp_data.setSendCallback(send_callback);
 
-  // Send after 23h00
-  if(send_again && (currentHour == 23) && (currentMin > 00)){
-    // Send email with all files
-    DEBUG_PRINTLN("Sending email...");
-    smtp_data.setLogin("smtp.gmail.com", 465, "mdautomatizada@gmail.com", "2020ProjetoMDautomatizada");
-    smtp_data.setSender("ESP32", "mdautomatizada@gmail.com");
-    //Set Email priority or importance High, Normal, Low or 1 to 5 (1 is highest)
-    smtp_data.setPriority("High");
-    smtp_data.setSubject("ESP32 Mail Sending");
-    smtp_data.setMessage("<div style=\"color:#ff0000;font-size:20px;\">Saved values - From ESP32</div>", true);
-
-    // Attach all files
-    File root = SPIFFS.open("/");
-    File file = root.openNextFile();
+  //Start sending Email, can be set callback function to track the status
+  if(!MailClient.sendMail(smtp_data)){
+    DEBUG_PRINTLN("Error sending Email, " + MailClient.smtpErrorReason());
+  }
+  else{
+    // Send ok, remove files from SPIFFS
+    DEBUG_PRINTLN("Email sent!");
+    root = SPIFFS.open("/");
+    file = root.openNextFile();
     while(file){
-      String path = file.name();
-      DEBUG_PRINT("FILE: "); DEBUG_PRINTLN(path);
-      smtp_data.addAttachFile(path);
+      path = file.name();
+      DEBUG_PRINT(path);
+      if(SPIFFS.remove(path)){
+        DEBUG_PRINTLN(" - file deleted");
+      }
       file = root.openNextFile();
     }
-    smtp_data.setSendCallback(send_callback);
-
-    //Start sending Email, can be set callback function to track the status
-    if(!MailClient.sendMail(smtp_data)){
-      DEBUG_PRINTLN("Error sending Email, " + MailClient.smtpErrorReason());
-    }
-    else{
-      // Send ok, remove files from SPIFFS
-      File file = root.openNextFile();
-      while(file){
-        String path = file.name();
-        DEBUG_PRINT(path);
-        if(SPIFFS.remove(path)){
-          DEBUG_PRINTLN(" - file deleted");
-        }
-        file = root.openNextFile();
-      }
-    }
-
-    //Clear all data from Email object to free memory
-    smtp_data.empty();
     send_again = false;
   }
+
+  //Clear all data from Email object to free memory
+  smtp_data.empty();
   return;
 }
