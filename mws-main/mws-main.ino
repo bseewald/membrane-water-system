@@ -52,15 +52,16 @@ const char* password = "2020projetoautoFL";
 // ---------------------------------------------
 // Server URL
 // ---------------------------------------------
-#define SERVER_RETRY 3
+#define SERVER_RETRY 1 // TODO: alterar valor
 #define ERROR 404
 bool send_again = false;
 const char *post_url = "http://13.68.215.66:58721";
+// TODO: alterar IP liberado no servidor AWS
 
 // ---------------------------------------------
 // Ph and EC - I2C address
 // ---------------------------------------------
-// Ezo_board ph = Ezo_board(99, "PH");
+Ezo_board ph = Ezo_board(99, "PH");
 // Ezo_board ec = Ezo_board(100, "EC");
 
 // ---------------------------------------------
@@ -69,6 +70,7 @@ const char *post_url = "http://13.68.215.66:58721";
 #define RXD2 16
 #define TXD2 17
 HardwareSerial serial_balance(2);
+const uint8_t GETWEIGHT[] = { 0x50, 0x52, 0x49, 0x4E, 0x54, 0x0D }; // PRINT<CR>
 
 // ---------------------------------------------
 // DS18B20 Temperature Sensor
@@ -104,8 +106,10 @@ unsigned long next_poll_time = 0;
 unsigned long check_wifi = 60000;
 
 const unsigned long reading_delay = 1000;     // how long we wait to receive a response, in milliseconds
-const unsigned long loop_delay = 300000;      // collect loop time: 5min
-const unsigned long retry_delay = 15000;
+// const unsigned long loop_delay = 300000;      // collect loop time: 5min
+const unsigned long loop_delay = 30000;
+// const unsigned long retry_delay = 15000;
+const unsigned long retry_delay = 1000;
 
 
 void setup()
@@ -122,7 +126,7 @@ void setup()
   temp_sensors.begin();
 
   // I2C
-  // Wire.begin();
+  Wire.begin();
 
   // SPIFFS partition
   if(!SPIFFS.begin(true)){
@@ -134,6 +138,7 @@ void setup()
   DEBUG_PRINT("Connecting to ");
   DEBUG_PRINTLN(ssid);
 
+  // TODO: repensar conexão wifi
   WiFi.begin(ssid, password);
   int i=0;
   while(WiFi.status() != WL_CONNECTED && i++<=WIFI_RETRY)
@@ -162,6 +167,7 @@ void loop()
   // ---------------------------------------------
   // Reconnect wifi
   // ---------------------------------------------
+  // TODO: repensar
   if((WiFi.status() != WL_CONNECTED) && (millis() > check_wifi)) {
     DEBUG_PRINTLN("Reconnecting to WiFi...");
     WiFi.disconnect();
@@ -173,6 +179,7 @@ void loop()
   // ---------------------------------------------
   // Send files to email (if necessary)
   // ---------------------------------------------
+  // TODO: repensar
   formatted_date = time_client.getFormattedDate();
   int currentHour = time_client.getHours();
   int currentMin = time_client.getMinutes();
@@ -192,12 +199,12 @@ void loop()
         // --------------------------------------------------------------
         temp_sensors.requestTemperatures();
 
-        // ph.send_read_cmd();
+        ph.send_read_cmd();
         // ec.send_read_cmd();
 
-        // TODO: PRINT<CR> ... The same operation as pressing the [PRINT] key
-        char command[] = "PRINT\r";
-        serial_balance.write((uint8_t *)command, sizeof(command));
+        // PRINT<CR> ... The same operation as pressing the [PRINT] key
+        DEBUG_PRINTLN("Sending PRINT command...");
+        serial_balance.write(GETWEIGHT, sizeof(GETWEIGHT));
 
         // Set when the response will arrive
         next_poll_time = millis() + reading_delay;
@@ -207,21 +214,23 @@ void loop()
 
     case READ:
       if (millis() >= next_poll_time) {
-
         // ---------------------------------------------
         // Read balance, temperature, pH and EC values
         // ---------------------------------------------
         String _time = get_time_stamp();
         values += "time=" + _time;
 
-        // TODO: Read balance info
+        // Read balance info
         String weighing = "";
+        char c;
         while(serial_balance.available() > 0) {
-          uint8_t byte_from_serial = serial_balance.read();
-          weighing += (char*)byte_from_serial;
+          c = char(serial_balance.read());
+          if(c != ' ' && c != '[' && c != ']' && c != 'g'){
+            weighing += c;
+          }
         }
         DEBUG_PRINT("WEIGHING: "); DEBUG_PRINTLN(weighing);
-        // values += "&weighing=" + weighing;
+        values += "&weighing=" + weighing;
 
         float feed = temp_sensors.getTempC(temp_sensor_feed);
         float permeate = temp_sensors.getTempC(temp_sensor_permeate);
@@ -229,13 +238,13 @@ void loop()
         DEBUG_PRINT("TEMP PERMEATE: "); DEBUG_PRINTLN(permeate);
         values += "&feed=" + String(feed) + "&permeate=" + String(permeate);
 
-        // PH.receive_read_cmd();
-        // DEBUG_PRINT(PH.get_name()); DEBUG_PRINT(": ");
+        ph.receive_read_cmd();
+        DEBUG_PRINT(ph.get_name()); DEBUG_PRINT(": ");
 
-        // if(reading_succeeded(PH) == true){                     // if the pH reading has been received and it is valid
-        //   DEBUG_PRINTLN(PH.get_last_received_reading(), 2);
-        //   values += "&ph=" + String(PH.get_last_received_reading(), 2);
-        // }
+        if(reading_succeeded(ph) == true){                     // if the ph reading has been received and it is valid
+          DEBUG_PRINTLN(ph.get_last_received_reading(), 2);
+          values += "&ph=" + String(ph.get_last_received_reading(), 2);
+        }
 
         // EC.receive_read_cmd();
         // DEBUG_PRINT(EC.get_name()); DEBUG_PRINT(": ");
@@ -267,9 +276,8 @@ void loop()
                       weighing,
                       String(feed),
                       String(permeate),
-                      "0.0",
+                      String(ph.get_last_received_reading(), 2),
                       "0.0");
-                      // String(PH.get_last_received_reading(), 2),
                       // String(EC.get_last_received_reading(), 2)
           send_again = true;
         }
