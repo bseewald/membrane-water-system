@@ -24,10 +24,13 @@
 #include <HardwareSerial.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <SPIFFS.h>
-#include "esp_http_client.h"
-#include "ESP32_MailClient.h"
-
+#include <RTClib.h>
+#include "FS.h"
+#include "SD.h"
+#include <SPI.h>
+// #include <SPIFFS.h>
+// #include "ESP32_MailClient.h"
+// #include "esp_http_client.h"
 
 // ---------------------------------------------
 // Debug options
@@ -43,20 +46,27 @@
 #endif
 
 // ---------------------------------------------
-// Wifi credentials
-// ---------------------------------------------
-#define WIFI_RETRY 30
-const char* ssid     = "PROJETOAUTOFL";
-const char* password = "2020projetoautoFL";
-
-// ---------------------------------------------
 // Server URL
 // ---------------------------------------------
-#define SERVER_RETRY 1 // TODO: alterar valor
-#define ERROR 404
-bool send_again = false;
-const char *post_url = "http://13.68.215.66:58721";
+// #define SERVER_RETRY 1 // TODO: alterar valor
+// #define ERROR 404
+// bool send_again = false;
+// const char *post_url = "http://13.68.215.66:58721";
 // TODO: alterar IP liberado no servidor AWS
+
+
+// ---------------------------------------------
+// SMTP data
+// ---------------------------------------------
+// SMTPData smtp_data;
+
+
+// ---------------------------------------------
+// Wifi credentials
+// ---------------------------------------------
+// #define WIFI_RETRY 30
+const char* ssid     = "PROJETOAUTOFL";
+const char* password = "2020projetoautoFL";
 
 // ---------------------------------------------
 // Ph and EC - I2C address
@@ -75,25 +85,43 @@ const uint8_t GETWEIGHT[] = { 0x50, 0x52, 0x49, 0x4E, 0x54, 0x0D }; // PRINT<CR>
 // ---------------------------------------------
 // DS18B20 Temperature Sensor
 // ---------------------------------------------
-#define ONE_WIRE_BUS 5
+#define ONE_WIRE_BUS 2
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature temp_sensors(&oneWire);
 DeviceAddress temp_sensor_feed = { 0x28, 0x92, 0x98, 0x79, 0x97, 0x7, 0x3, 0xAD };
 DeviceAddress temp_sensor_permeate = { 0x28, 0x26, 0x2B, 0x79, 0x97, 0x2, 0x3, 0x88 };
 
 // ---------------------------------------------
+// RTC
+// ---------------------------------------------
+RTC_DS3231 rtc;
+
+// ---------------------------------------------
 // NTP
 // ---------------------------------------------
-WiFiUDP ntpUDP;
-NTPClient time_client(ntpUDP);
+WiFiUDP ntp_udp;
+NTPClient time_client(ntp_udp);
 String formatted_date;
 String time_stamp;
 String day_stamp;
 
 // ---------------------------------------------
-// SMTP data
+// LED
 // ---------------------------------------------
-SMTPData smtp_data;
+#define LED 15
+
+// ---------------------------------------------
+// Sleep
+// ---------------------------------------------
+// Conversion factor for micro seconds to seconds
+uint64_t uS_TO_S_FACTOR = 1000000;
+// Sleep for 10 minutes = 600 seconds
+uint64_t TIME_TO_SLEEP = 600;
+
+// ---------------------------------------------
+// SD Card
+// ---------------------------------------------
+#define SD_CS 5
 
 // ---------------------------------------------
 // Variables
@@ -118,6 +146,9 @@ void setup()
   Serial.begin(115200);
   delay(10);
 
+  // LED
+  pinMode(LED, OUTPUT);
+
   // Balance
   serial_balance.begin(9600, SERIAL_8N1, RXD2, TXD2);
   delay(10);
@@ -128,64 +159,78 @@ void setup()
   // I2C
   Wire.begin();
 
-  // SPIFFS partition
-  if(!SPIFFS.begin(true)){
-    DEBUG_PRINTLN("An Error has occurred while mounting SPIFFS");
+  // Initialize SD card
+  SD.begin(SD_CS);
+  DEBUG_PRINTLN("Initializing SD card...");
+  if(!SD.begin(SD_CS)) {
+    DEBUG_PRINTLN("Card Mount Failed");
   }
+  uint8_t cardType = SD.cardType();
+  if(cardType == CARD_NONE) {
+    DEBUG_PRINTLN("No SD card attached");
+  }
+
+  // SPIFFS partition
+  // if(!SPIFFS.begin(true)){
+  //   DEBUG_PRINTLN("An Error has occurred while mounting SPIFFS");
+  // }
 
   // WiFi network
   while(!Serial);
-  DEBUG_PRINT("Connecting to ");
-  DEBUG_PRINTLN(ssid);
 
-  // TODO: repensar conexão wifi
+  DEBUG_PRINT("Connecting to "); DEBUG_PRINTLN(ssid);
   WiFi.begin(ssid, password);
-  int i=0;
-  while(WiFi.status() != WL_CONNECTED && i++<=WIFI_RETRY)
-  {
-    delay(1000);
-    i=i+1;
-    if(i > WIFI_RETRY){
-      DEBUG_PRINTLN("Problem with wifi. Restarting .....");
-      ESP.restart();
-    }
-  }
+  // int i=0;
+  // while(WiFi.status() != WL_CONNECTED && i++<=WIFI_RETRY)
+  // {
+  //   delay(1000);
+  //   i=i+1;
+  //   if(i > WIFI_RETRY){
+  //     DEBUG_PRINTLN("Problem with wifi. Restarting .....");
+  //     ESP.restart();
+  //   }
+  // }
+  delay(10000);
   DEBUG_PRINTLN("WiFi connected"); DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(WiFi.localIP());
 
-  // Initialize a NTPClient to get time
+  // NTP
   time_client.begin();
-  // Set offset time in seconds to adjust for your timezone, for example:
   // GMT +1 = 3600 / GMT -1 = -3600
   time_client.setTimeOffset(-10800);
+
+  // RTC
+  if (!rtc.begin()) {
+    DEBUG_PRINTLN("Couldn't find RTC");
+    while (1);
+  }
+  RTC_Valid();
+  // RTC_Update();
 }
 
 void loop()
 {
   String values = "";
-  int response = ERROR;
+  // int response = ERROR;
 
   // ---------------------------------------------
   // Reconnect wifi
   // ---------------------------------------------
-  // TODO: repensar
-  if((WiFi.status() != WL_CONNECTED) && (millis() > check_wifi)) {
-    DEBUG_PRINTLN("Reconnecting to WiFi...");
-    WiFi.disconnect();
-    WiFi.begin(ssid, password);
-    check_wifi = millis() + 60000;
-    DEBUG_PRINTLN("WiFi connected"); DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(WiFi.localIP());
-  }
+  // if((WiFi.status() != WL_CONNECTED) && (millis() > check_wifi)) {
+  //   DEBUG_PRINTLN("Reconnecting to WiFi...");
+  //   WiFi.disconnect();
+  //   WiFi.begin(ssid, password);
+  //   check_wifi = millis() + 60000;
+  //   DEBUG_PRINTLN("WiFi connected"); DEBUG_PRINT("IP address: "); DEBUG_PRINTLN(WiFi.localIP());
+  // }
 
   // ---------------------------------------------
   // Send files to email (if necessary)
   // ---------------------------------------------
-  // TODO: repensar
-  formatted_date = time_client.getFormattedDate();
-  int currentHour = time_client.getHours();
-  int currentMin = time_client.getMinutes();
-  if(send_again && (currentHour == 23) && (currentMin > 50)){
-    send_email();
-  }
+  // int currentHour = time_client.getHours();
+  // int currentMin = time_client.getMinutes();
+  // if(send_again && (currentHour == 23) && (currentMin > 50)){
+  //   send_email();
+  // }
 
   // ---------------------------------------------
   // Collect info from sensors
@@ -214,13 +259,14 @@ void loop()
 
     case READ:
       if (millis() >= next_poll_time) {
-        // ---------------------------------------------
-        // Read balance, temperature, pH and EC values
-        // ---------------------------------------------
-        String _time = get_time_stamp();
+
+        // LED ON
+        digitalWrite(LED, HIGH);
+
+        String _time = get_timestamp();
         values += "time=" + _time;
 
-        // Read balance info
+        // BALANCE
         String weighing = "";
         char c;
         while(serial_balance.available() > 0) {
@@ -232,24 +278,25 @@ void loop()
         DEBUG_PRINT("WEIGHING: "); DEBUG_PRINTLN(weighing);
         values += "&weighing=" + weighing;
 
+        // TEMPERATURE
         float feed = temp_sensors.getTempC(temp_sensor_feed);
         float permeate = temp_sensors.getTempC(temp_sensor_permeate);
-        DEBUG_PRINT("TEMP FEED: "); DEBUG_PRINTLN(feed);
-        DEBUG_PRINT("TEMP PERMEATE: "); DEBUG_PRINTLN(permeate);
+        // DEBUG_PRINT("TEMP FEED: "); DEBUG_PRINTLN(feed);
+        // DEBUG_PRINT("TEMP PERMEATE: "); DEBUG_PRINTLN(permeate);
         values += "&feed=" + String(feed) + "&permeate=" + String(permeate);
 
+        // pH
         ph.receive_read_cmd();
         DEBUG_PRINT(ph.get_name()); DEBUG_PRINT(": ");
-
-        if(reading_succeeded(ph) == true){                     // if the ph reading has been received and it is valid
+        if(reading_succeeded(ph) == true){
           DEBUG_PRINTLN(ph.get_last_received_reading(), 2);
           values += "&ph=" + String(ph.get_last_received_reading(), 2);
         }
 
+        // EC
         // EC.receive_read_cmd();
         // DEBUG_PRINT(EC.get_name()); DEBUG_PRINT(": ");
-
-        // if(reading_succeeded(EC) == true){                    // if the EC reading has been received and it is valid
+        // if(reading_succeeded(EC) == true){
         //   DEBUG_PRINTLN(EC.get_last_received_reading(), 0);
         //   values += "&ec=" + String(EC.get_last_received_reading(), 2);
         // }
@@ -258,34 +305,142 @@ void loop()
         next_poll_time =  millis() + loop_delay;              // update the time for the next reading loop
         current_step = REQUEST;
 
+        DEBUG_PRINTLN(values);
+
+        // ---------------------------------------------
+        // Save in SD Card
+        // ---------------------------------------------
+        DEBUG_PRINTLN("SAVE IN SD CARD");
+        save_in_file(_time,
+                    weighing,
+                    String(feed),
+                    String(permeate),
+                    String(ph.get_last_received_reading(), 2),
+                    "0.0");
+                    // String(EC.get_last_received_reading(), 2)
+
+        // LED OFF
+        delay(5000);
+        digitalWrite(LED, LOW);
+
         // ---------------------------------------------
         // Send URL to server
         // ---------------------------------------------
-        DEBUG_PRINTLN(values);
-        int i = 0;
-        while(i < SERVER_RETRY){
-          response = post_data_server(values.c_str());
-          if(response == 200)
-            break;
-          i++;
-          delay(retry_delay);
-        }
-        if(response != 200){
-          DEBUG_PRINTLN("SAVE IN SPIFFS");
-          save_in_file(_time,
-                      weighing,
-                      String(feed),
-                      String(permeate),
-                      String(ph.get_last_received_reading(), 2),
-                      "0.0");
-                      // String(EC.get_last_received_reading(), 2)
-          send_again = true;
-        }
+        // int i = 0;
+        // while(i < SERVER_RETRY){
+        //   response = post_data_server(values.c_str());
+        //   if(response == 200)
+        //     break;
+        //   i++;
+        //   delay(retry_delay);
+        // }
+        // if(response != 200){
+        //   DEBUG_PRINTLN("SAVE IN SPIFFS");
+        //   save_in_file(_time,
+        //               weighing,
+        //               String(feed),
+        //               String(permeate),
+        //               String(ph.get_last_received_reading(), 2),
+        //               "0.0");
+        //               // String(EC.get_last_received_reading(), 2)
+        //   send_again = true;
+        // }
       }
       break;
   }
 }
 
+// ---------------------------------------------
+// RTC Setup
+// ---------------------------------------------
+void RTC_Update(){
+  time_client.update();
+
+  // 2018-05-28T16:00:13Z
+  int split = formatted_date.indexOf("T");
+  formatted_date = time_client.getFormattedDate();
+  day_stamp = formatted_date.substring(0, split);
+  time_stamp = formatted_date.substring(split+1, formatted_date.length()-1);
+
+  char* token = strtok(day_stamp, "-");
+  while(token != NULL) {
+      printf("%s\n", token);
+      token = strtok(NULL, "-");
+  }
+
+
+  DateTime now = DateTime(, time_stamp.c_str());
+  DEBUG_PRINTLN(String(now.year(), DEC) + ":" + String(now.month(), DEC) + ":" + String(now.day(), DEC));
+  rtc.adjust(now);
+}
+
+void RTC_Valid(){
+  if(rtc.lostPower()) {
+    DEBUG_PRINTLN("RTC lost power, lets set the time!");
+    RTC_Update();
+  }
+}
+
+String get_timestamp(){
+  DateTime now = rtc.now();
+  char timestamp[10];
+  sprintf(timestamp, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+  // timestamp += String(now.hour(), DEC) + ":" + String(now.minute(), DEC) + ":" + String(now.second(), DEC);
+  return String(timestamp);
+}
+
+String get_datestamp(){
+  DateTime now = rtc.now();
+  char datestamp[11];
+  sprintf(datestamp, "%04d-%02d-%02d", now.year(), now.month(), now.day());
+  // datestamp += String(now.year(), DEC) + "-" + String(now.month(), DEC) + "-" + String(now.day(), DEC);
+  return String(datestamp);
+}
+
+String get_ntp_date(){
+  unsigned long rawTime = (secs ? secs : this->getEpochTime()) / 86400L;  // in days
+  unsigned long days = 0, year = 1970;
+  uint8_t month;
+  static const uint8_t monthDays[]={31,28,31,30,31,30,31,31,30,31,30,31};
+
+  while((days += (LEAP_YEAR(year) ? 366 : 365)) <= rawTime)
+    year++;
+  rawTime -= days - (LEAP_YEAR(year) ? 366 : 365); // now it is days in this year, starting at 0
+  days=0;
+  for (month=0; month<12; month++) {
+    uint8_t monthLength;
+    if (month==1) { // february
+      monthLength = LEAP_YEAR(year) ? 29 : 28;
+    } else {
+      monthLength = monthDays[month];
+    }
+    if (rawTime < monthLength) break;
+    rawTime -= monthLength;
+  }
+  String monthStr = ++month < 10 ? "0" + String(month) : String(month); // jan is month 1
+  String dayStr = ++rawTime < 10 ? "0" + String(rawTime) : String(rawTime); // day of month
+  return String(year) + "-" + monthStr + "-" + dayStr +
+}
+
+void save_in_file(String _time, String _weight, String _feed, String _permeate, String _ph, String _ec){
+  String filename = "/" + get_datestamp() + ".csv";
+  String _values = _time + "," + _weight + "," + _feed + "," + _permeate + "," + _ph + "," + _ec + "\n";
+
+  // Create a file on the SD card and write the data labels
+  File file = SD.open(filename, "a+");
+  if(!file) {
+    DEBUG_PRINTLN("Failed to open file");
+  }
+  else {
+    if(file.print(_values)) {
+      DEBUG_PRINTLN("Message saved");
+    } else {
+    DEBUG_PRINTLN("Message not saved");
+    }
+  }
+  file.close();
+  return;
+}
 
 // this function makes sure that when we get a reading
 // we know if it was valid or if we got an error
@@ -311,150 +466,149 @@ bool reading_succeeded(Ezo_board &Sensor) {
   }
 }
 
-esp_err_t _http_event_handler(esp_http_client_event_t *evt){
-  switch (evt->event_id) {
-    case HTTP_EVENT_ERROR:
-      DEBUG_PRINTLN("HTTP_EVENT_ERROR");
-      break;
-    case HTTP_EVENT_ON_CONNECTED:
-      DEBUG_PRINTLN("HTTP_EVENT_ON_CONNECTED");
-      break;
-    case HTTP_EVENT_HEADER_SENT:
-      DEBUG_PRINTLN("HTTP_EVENT_HEADER_SENT");
-      break;
-    case HTTP_EVENT_ON_HEADER:
-      DEBUG_PRINTLN("HTTP_EVENT_ON_HEADER");
-      break;
-    case HTTP_EVENT_ON_DATA:
-      DEBUG_PRINTLN("HTTP_EVENT_ON_DATA");
-      break;
-    case HTTP_EVENT_ON_FINISH:
-      DEBUG_PRINTLN("HTTP_EVENT_ON_FINISH");
-      break;
-    case HTTP_EVENT_DISCONNECTED:
-      DEBUG_PRINTLN("HTTP_EVENT_DISCONNECTED");
-      break;
-  }
-  return ESP_OK;
-}
+// esp_err_t _http_event_handler(esp_http_client_event_t *evt){
+//   switch (evt->event_id) {
+//     case HTTP_EVENT_ERROR:
+//       DEBUG_PRINTLN("HTTP_EVENT_ERROR");
+//       break;
+//     case HTTP_EVENT_ON_CONNECTED:
+//       DEBUG_PRINTLN("HTTP_EVENT_ON_CONNECTED");
+//       break;
+//     case HTTP_EVENT_HEADER_SENT:
+//       DEBUG_PRINTLN("HTTP_EVENT_HEADER_SENT");
+//       break;
+//     case HTTP_EVENT_ON_HEADER:
+//       DEBUG_PRINTLN("HTTP_EVENT_ON_HEADER");
+//       break;
+//     case HTTP_EVENT_ON_DATA:
+//       DEBUG_PRINTLN("HTTP_EVENT_ON_DATA");
+//       break;
+//     case HTTP_EVENT_ON_FINISH:
+//       DEBUG_PRINTLN("HTTP_EVENT_ON_FINISH");
+//       break;
+//     case HTTP_EVENT_DISCONNECTED:
+//       DEBUG_PRINTLN("HTTP_EVENT_DISCONNECTED");
+//       break;
+//   }
+//   return ESP_OK;
+// }
 
-int post_data_server(const char *post_data){
-  int response = 404;
-  esp_err_t res = ESP_OK;
-  esp_http_client_handle_t http_client;
-  esp_http_client_config_t config_client = {0};
+// int post_data_server(const char *post_data){
+//   int response = 404;
+//   esp_err_t res = ESP_OK;
+//   esp_http_client_handle_t http_client;
+//   esp_http_client_config_t config_client = {0};
 
-  config_client.url = post_url;
-  config_client.event_handler = _http_event_handler;
-  config_client.method = HTTP_METHOD_POST;
+//   config_client.url = post_url;
+//   config_client.event_handler = _http_event_handler;
+//   config_client.method = HTTP_METHOD_POST;
 
-  http_client = esp_http_client_init(&config_client);
+//   http_client = esp_http_client_init(&config_client);
 
-  esp_http_client_set_post_field(http_client, post_data, strlen(post_data));
+//   esp_http_client_set_post_field(http_client, post_data, strlen(post_data));
 
-  esp_err_t err = esp_http_client_perform(http_client);
-  if (err == res) {
-    response = 200;
-  }
-  DEBUG_PRINT("esp_http_client_get_status_code: ");
-  DEBUG_PRINTLN(esp_http_client_get_status_code(http_client));
+//   esp_err_t err = esp_http_client_perform(http_client);
+//   if (err == res) {
+//     response = 200;
+//   }
+//   DEBUG_PRINT("esp_http_client_get_status_code: ");
+//   DEBUG_PRINTLN(esp_http_client_get_status_code(http_client));
 
-  esp_http_client_cleanup(http_client);
-  return response;
-}
+//   esp_http_client_cleanup(http_client);
+//   return response;
+// }
 
-void save_in_file(String _time, String _weight, String _feed, String _permeate, String _ph, String _ec){
-  String filename = "/" + get_date_stamp() + ".txt";
-  File file = SPIFFS.open(filename, "a+");
-  if(!file) {
-    DEBUG_PRINTLN("There was an error opening the file for writing");
-  }
-  // _time,_weight,_feed,_permeate,_ph,_ec
-  String _values = _time + "," + _weight + "," + _feed + "," + _permeate + "," + _ph + "," + _ec + "\n";
-  if(file.print(_values)) {
-    DEBUG_PRINTLN("File was written");
-  }
-  file.close();
-  // DEBUG_PRINTLN(SPIFFS.usedBytes());
-  return;
-}
+// void save_in_file(String _time, String _weight, String _feed, String _permeate, String _ph, String _ec){
+//   String filename = "/" + get_date_stamp() + ".txt";
+//   File file = SPIFFS.open(filename, "a+");
+//   if(!file) {
+//     DEBUG_PRINTLN("There was an error opening the file for writing");
+//   }
+//   // _time,_weight,_feed,_permeate,_ph,_ec
+//   String _values = _time + "," + _weight + "," + _feed + "," + _permeate + "," + _ph + "," + _ec + "\n";
+//   if(file.print(_values)) {
+//     DEBUG_PRINTLN("File was written");
+//   }
+//   file.close();
+//   return;
+// }
 
-String get_time_stamp(){
-  if(!time_client.update()) {
-    time_client.forceUpdate();
-  }
-  // The formatted_date comes with the following format:
-  // 2018-05-28T16:00:13Z
-  // We need to extract date and time
-  formatted_date = time_client.getFormattedDate();
-  int split = formatted_date.indexOf("T");
-  time_stamp = formatted_date.substring(split+1, formatted_date.length()-1);
-  DEBUG_PRINT("HOUR: "); DEBUG_PRINTLN(time_stamp);
-  return time_stamp;
-}
+// String get_time_stamp(){
+//   if(!time_client.update()) {
+//     time_client.forceUpdate();
+//   }
+//   // The formatted_date comes with the following format:
+//   // 2018-05-28T16:00:13Z
+//   // We need to extract date and time
+//   formatted_date = time_client.getFormattedDate();
+//   int split = formatted_date.indexOf("T");
+//   time_stamp = formatted_date.substring(split+1, formatted_date.length()-1);
+//   DEBUG_PRINT("HOUR: "); DEBUG_PRINTLN(time_stamp);
+//   return time_stamp;
+// }
 
-String get_date_stamp(){
-  if(!time_client.update()) {
-    time_client.forceUpdate();
-  }
-  formatted_date = time_client.getFormattedDate();
-  int split = formatted_date.indexOf("T");
-  day_stamp = formatted_date.substring(0, split);
-  DEBUG_PRINT("DAY: "); DEBUG_PRINTLN(day_stamp);
-  return day_stamp;
-}
+// String get_date_stamp(){
+//   if(!time_client.update()) {
+//     time_client.forceUpdate();
+//   }
+//   formatted_date = time_client.getFormattedDate();
+//   int split = formatted_date.indexOf("T");
+//   day_stamp = formatted_date.substring(0, split);
+//   DEBUG_PRINT("DAY: "); DEBUG_PRINTLN(day_stamp);
+//   return day_stamp;
+// }
 
-//Callback function to get the Email sending status
-void send_callback(SendStatus msg){
-  DEBUG_PRINTLN(msg.info());
-}
+// //Callback function to get the Email sending status
+// void send_callback(SendStatus msg){
+//   DEBUG_PRINTLN(msg.info());
+// }
 
-void send_email(){
-  // Send email with all files (after 23h00)
-  DEBUG_PRINTLN("Sending email...");
-  // smtp_data.setDebug(true);
-  smtp_data.setLogin("smtp.gmail.com", 465, "mdautomatizada", "2020ProjetoMDautomatizada");
-  smtp_data.setSender("ESP32", "mdautomatizada@gmail.com");
-  //Set Email priority or importance High, Normal, Low or 1 to 5 (1 is highest)
-  smtp_data.setPriority("High");
-  smtp_data.setSubject("ESP32 Mail Sending");
-  smtp_data.setMessage("<div style=\"color:#ff0000;font-size:12px;\">Saved values - From ESP32</div>", true);
-  smtp_data.addRecipient("mdautomatizada@gmail.com");
-  smtp_data.setFileStorageType(MailClientStorageType::SPIFFS);
+// void send_email(){
+//   // Send email with all files (after 23h00)
+//   DEBUG_PRINTLN("Sending email...");
+//   // smtp_data.setDebug(true);
+//   smtp_data.setLogin("smtp.gmail.com", 465, "mdautomatizada", "2020ProjetoMDautomatizada");
+//   smtp_data.setSender("ESP32", "mdautomatizada@gmail.com");
+//   //Set Email priority or importance High, Normal, Low or 1 to 5 (1 is highest)
+//   smtp_data.setPriority("High");
+//   smtp_data.setSubject("ESP32 Mail Sending");
+//   smtp_data.setMessage("<div style=\"color:#ff0000;font-size:12px;\">Saved values - From ESP32</div>", true);
+//   smtp_data.addRecipient("mdautomatizada@gmail.com");
+//   smtp_data.setFileStorageType(MailClientStorageType::SPIFFS);
 
-  // Attach all files
-  File root = SPIFFS.open("/");
-  File file = root.openNextFile();
-  String path = "";
-  while(file){
-    path = file.name();
-    DEBUG_PRINT("FILE: "); DEBUG_PRINTLN(path);
-    smtp_data.addAttachFile(path);
-    file = root.openNextFile();
-  }
-  smtp_data.setSendCallback(send_callback);
+//   // Attach all files
+//   File root = SPIFFS.open("/");
+//   File file = root.openNextFile();
+//   String path = "";
+//   while(file){
+//     path = file.name();
+//     DEBUG_PRINT("FILE: "); DEBUG_PRINTLN(path);
+//     smtp_data.addAttachFile(path);
+//     file = root.openNextFile();
+//   }
+//   smtp_data.setSendCallback(send_callback);
 
-  //Start sending Email, can be set callback function to track the status
-  if(!MailClient.sendMail(smtp_data)){
-    DEBUG_PRINTLN("Error sending Email, " + MailClient.smtpErrorReason());
-  }
-  else{
-    // Send ok, remove files from SPIFFS
-    DEBUG_PRINTLN("Email sent!");
-    root = SPIFFS.open("/");
-    file = root.openNextFile();
-    while(file){
-      path = file.name();
-      DEBUG_PRINT(path);
-      if(SPIFFS.remove(path)){
-        DEBUG_PRINTLN(" - file deleted");
-      }
-      file = root.openNextFile();
-    }
-    send_again = false;
-  }
+//   //Start sending Email, can be set callback function to track the status
+//   if(!MailClient.sendMail(smtp_data)){
+//     DEBUG_PRINTLN("Error sending Email, " + MailClient.smtpErrorReason());
+//   }
+//   else{
+//     // Send ok, remove files from SPIFFS
+//     DEBUG_PRINTLN("Email sent!");
+//     root = SPIFFS.open("/");
+//     file = root.openNextFile();
+//     while(file){
+//       path = file.name();
+//       DEBUG_PRINT(path);
+//       if(SPIFFS.remove(path)){
+//         DEBUG_PRINTLN(" - file deleted");
+//       }
+//       file = root.openNextFile();
+//     }
+//     send_again = false;
+//   }
 
-  //Clear all data from Email object to free memory
-  smtp_data.empty();
-  return;
-}
+//   //Clear all data from Email object to free memory
+//   smtp_data.empty();
+//   return;
+// }
