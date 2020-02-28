@@ -32,7 +32,7 @@
 // ---------------------------------------------
 // Debug options
 // ---------------------------------------------
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
   #define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
@@ -52,7 +52,7 @@ const char* password = "2020projetoautoFL";
 // Ph and EC - I2C address
 // ---------------------------------------------
 Ezo_board ph = Ezo_board(99, "PH");
-// Ezo_board ec = Ezo_board(100, "EC");
+// TODO: Ezo_board ec = Ezo_board(100, "EC");
 
 // ---------------------------------------------
 // UART 2 PINS
@@ -101,7 +101,7 @@ enum reading_step current_step = REQUEST;
 unsigned long next_poll_time = 0;
 const unsigned long reading_delay = 1000;     // how long we wait to receive a response, in milliseconds
 const unsigned long loop_delay = 300000;      // collect loop time: 5min
-// const unsigned long loop_delay = 30000;
+// const unsigned long loop_delay = 120000;       // testing
 
 
 void setup()
@@ -156,8 +156,6 @@ void setup()
 
 void loop()
 {
-  String values = "";
-
   // ---------------------------------------------
   // Collect info from sensors
   // ---------------------------------------------
@@ -171,7 +169,7 @@ void loop()
         temp_sensors.requestTemperatures();
 
         ph.send_read_cmd();
-        // ec.send_read_cmd();
+        // TODO: ec.send_read_cmd();
 
         // PRINT<CR> ... The same operation as pressing the [PRINT] key
         serial_balance.write(GETWEIGHT, sizeof(GETWEIGHT));
@@ -189,7 +187,6 @@ void loop()
         digitalWrite(LED, HIGH);
 
         String _time = get_timestamp();
-        values += "time=" + _time;
 
         // BALANCE
         String weighing = "";
@@ -200,46 +197,41 @@ void loop()
             weighing += c;
           }
         }
-        values += "&weighing=" + weighing;
+        weighing.trim();
 
         // TEMPERATURE
         float feed = temp_sensors.getTempC(temp_sensor_feed);
         float permeate = temp_sensors.getTempC(temp_sensor_permeate);
-        values += "&feed=" + String(feed) + "&permeate=" + String(permeate);
 
-        // pH
+        // sensors
         ph.receive_read_cmd();
-        DEBUG_PRINT(ph.get_name()); DEBUG_PRINT(": ");
-        if(reading_succeeded(ph) == true){
-          DEBUG_PRINTLN(ph.get_last_received_reading(), 2);
-          values += "&ph=" + String(ph.get_last_received_reading(), 2);
-        }
-
-        // EC
         // ec.receive_read_cmd();
+
+        // TODO: test EC
         // DEBUG_PRINT(ec.get_name()); DEBUG_PRINT(": ");
         // if(reading_succeeded(ec) == true){
-        //   DEBUG_PRINTLN(ec.get_last_received_reading(), 0);
-        //   values += "&ec=" + String(ec.get_last_received_reading(), 2);
+        //   DEBUG_PRINTLN(ec.get_last_received_reading(), 2);
         // }
 
         // Next collect: +5 min
         next_poll_time =  millis() + loop_delay;    // update the time for the next reading loop
         current_step = REQUEST;
 
-        DEBUG_PRINTLN(values);
-
         // ---------------------------------------------
         // Save in SD Card
         // ---------------------------------------------
-        DEBUG_PRINTLN("SAVE IN SD CARD");
+        DateTime now = rtc.now();
+        if(now.hour() == 0 && now.minute() > 0){
+          save_header_in_file();
+        }
+
         save_in_file(_time,
                     weighing,
                     String(feed),
                     String(permeate),
                     String(ph.get_last_received_reading(), 2),
                     "0.0");
-                    // String(ec.get_last_received_reading(), 2)
+                    // TODO: String(ec.get_last_received_reading(), 2)
 
         // LED OFF
         delay(5000);
@@ -303,23 +295,49 @@ String get_datestamp(){
   return String(datestamp);
 }
 
+void save_header_in_file(){
+  String filename = "/" + get_datestamp() + ".csv";
+  String header = "timestamp, weighing, temp_feed, temp_permeate, ph, ec\n";
+
+  // Create a file with header on the SD card
+  File file;
+  File file_open = SD.open(filename);
+  if(!file_open) {
+    DEBUG_PRINTLN("Failed to open file, creating...");
+
+    file = SD.open(filename, "w");
+    if(!file){
+      DEBUG_PRINTLN("Something wrong with file.");
+      return;
+    }
+    if(file.print(header)) {
+      DEBUG_PRINT("Header saved: "); DEBUG_PRINTLN(header);
+    } else {
+      DEBUG_PRINTLN("Header not saved");
+    }
+    file.close();
+  }
+  return;
+}
+
 void save_in_file(String _time, String _weight, String _feed, String _permeate, String _ph, String _ec){
   String filename = "/" + get_datestamp() + ".csv";
   String _values = _time + "," + _weight + "," + _feed + "," + _permeate + "," + _ph + "," + _ec + "\n";
 
-  // Create a file on the SD card and write the data labels
+  // Save data on the SD Card
   File file = SD.open(filename, "a+");
   if(!file) {
     DEBUG_PRINTLN("Failed to open file");
+    return;
   }
   else {
     if(file.print(_values)) {
-      DEBUG_PRINTLN("Message saved");
+      DEBUG_PRINT("Message saved: "); DEBUG_PRINTLN(_values);
     } else {
-    DEBUG_PRINTLN("Message not saved");
+      DEBUG_PRINTLN("Message not saved");
     }
+    file.close();
   }
-  file.close();
   return;
 }
 
