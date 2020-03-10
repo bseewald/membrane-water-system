@@ -32,7 +32,7 @@
 // ---------------------------------------------
 // Debug options
 // ---------------------------------------------
-// #define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
   #define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
@@ -123,14 +123,31 @@ void setup()
   // I2C
   Wire.begin();
 
+  int i;
+
   // Initialize SD card
   SD.begin(SD_CS);
   DEBUG_PRINTLN("Initializing SD card...");
   if(!SD.begin(SD_CS)) {
+    for(i=0; i<5; i++){
+      digitalWrite(LED, HIGH);
+      delay(1000);
+      digitalWrite(LED, LOW);
+      delay(1000);
+    }
     DEBUG_PRINTLN("Card Mount Failed");
   }
+
+  delay(10000);
+
   uint8_t cardType = SD.cardType();
   if(cardType == CARD_NONE) {
+    for(i=0; i<10; i++){
+      digitalWrite(LED, HIGH);
+      delay(1000);
+      digitalWrite(LED, LOW);
+      delay(1000);
+    }
     DEBUG_PRINTLN("No SD card attached");
   }
 
@@ -152,6 +169,29 @@ void setup()
     while (1);
   }
   RTC_Valid();
+
+  // Calibration phase
+  digitalWrite(LED, HIGH);
+  delay(60000);
+  digitalWrite(LED, LOW);
+  delay(10000);
+  digitalWrite(LED, HIGH);
+  ph_mid_probe(); // pH = 7
+
+  digitalWrite(LED, HIGH);
+  delay(60000);
+  digitalWrite(LED, LOW);
+  delay(10000);
+  digitalWrite(LED, HIGH);
+  ph_low_probe(); // pH = 4
+
+  // Signal: end of calibration phase
+  for(i=0; i<5; i++){
+    digitalWrite(LED, HIGH);
+    delay(1000);
+    digitalWrite(LED, LOW);
+    delay(1000);
+  }
 }
 
 void loop()
@@ -239,6 +279,92 @@ void loop()
       }
       break;
   }
+}
+
+// ---------------------------------------------
+// pH Probe Calibration
+// ---------------------------------------------
+void ph_mid_probe(){
+  uint8_t ph_readings = 0;
+  float ph_value = 0, old_ph_value = 0;
+  bool calibrated = false;
+
+  DEBUG_PRINTLN("Calibrating probe...");
+  while(!calibrated){
+    // 1. Continuous readings
+    ph.send_read_cmd();
+    delay(1000);
+    ph.receive_read_cmd();
+    ph_value = ph.get_last_received_reading();
+
+    DEBUG_PRINT("pH: "); DEBUG_PRINTLN(ph_value, 2);
+    if(ph_value == old_ph_value) {
+      DEBUG_PRINT("pH readings: "); DEBUG_PRINTLN(ph_readings);
+      ph_readings++;
+    }
+    else{
+      ph_readings = 0;
+    }
+    old_ph_value = ph_value;
+
+    // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,mid,7
+    if(ph_readings > 3){
+      ph.send_cmd_with_num("cal,mid,", 7.00);
+      delay(1000);
+      calibrated = true;
+      DEBUG_PRINTLN("pH Calibrated!");
+    }
+  }
+
+  // Calibrated ?
+  ph.send_read_cmd();
+  delay(1000);
+  ph.receive_read_cmd();
+  DEBUG_PRINTLN(ph.get_last_received_reading());
+
+  return;
+}
+
+void ph_low_probe(){
+
+  uint8_t ph_readings = 0;
+  float ph_value = 0, old_ph_value = 0;
+  bool calibrated = false;
+
+  DEBUG_PRINTLN("Calibrating probe...");
+  while(!calibrated){
+    // 1. Continuous readings
+    ph.send_read_cmd();
+    delay(1000);
+    ph.receive_read_cmd();
+    ph_value = ph.get_last_received_reading();
+
+    DEBUG_PRINT("pH: "); DEBUG_PRINTLN(ph_value, 2);
+    if(ph_value == old_ph_value) {
+      DEBUG_PRINT("pH readings: "); DEBUG_PRINTLN(ph_readings);
+      ph_readings++;
+    }
+    else{
+      ph_readings = 0;
+    }
+    old_ph_value = ph_value;
+
+    // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,low,4
+    if(ph_readings > 3){
+      ph.send_cmd_with_num("cal,low,", 4.00);
+      delay(1000);
+      calibrated = true;
+      DEBUG_PRINTLN("pH Calibrated!");
+    }
+  }
+
+  // Calibrated ?
+  ph.send_read_cmd();
+  delay(1000);
+  ph.receive_read_cmd();
+  DEBUG_PRINTLN(ph.get_last_received_reading());
+
+  return;
 }
 
 // ---------------------------------------------
