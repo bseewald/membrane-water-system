@@ -52,7 +52,7 @@ const char* password = "2020projetoautoFL";
 // Ph and EC - I2C address
 // ---------------------------------------------
 Ezo_board ph = Ezo_board(99, "PH");
-// TODO: Ezo_board ec = Ezo_board(100, "EC");
+Ezo_board ec = Ezo_board(100, "EC");
 
 // ---------------------------------------------
 // UART 2 PINS
@@ -171,27 +171,8 @@ void setup()
   RTC_Valid();
 
   // Calibration phase
-  digitalWrite(LED, HIGH);
-  delay(60000);
-  digitalWrite(LED, LOW);
-  delay(10000);
-  digitalWrite(LED, HIGH);
-  ph_mid_probe(); // pH = 7
-
-  digitalWrite(LED, HIGH);
-  delay(60000);
-  digitalWrite(LED, LOW);
-  delay(10000);
-  digitalWrite(LED, HIGH);
-  ph_low_probe(); // pH = 4
-
-  // Signal: end of calibration phase
-  for(i=0; i<5; i++){
-    digitalWrite(LED, HIGH);
-    delay(1000);
-    digitalWrite(LED, LOW);
-    delay(1000);
-  }
+  ph_probe_calibration();
+  ec_probe_calibration();
 }
 
 void loop()
@@ -209,7 +190,7 @@ void loop()
         temp_sensors.requestTemperatures();
 
         ph.send_read_cmd();
-        // TODO: ec.send_read_cmd();
+        ec.send_read_cmd();
 
         // PRINT<CR> ... The same operation as pressing the [PRINT] key
         serial_balance.write(GETWEIGHT, sizeof(GETWEIGHT));
@@ -245,13 +226,11 @@ void loop()
 
         // sensors
         ph.receive_read_cmd();
-        // ec.receive_read_cmd();
+        ec.receive_read_cmd();
 
         // TODO: test EC
         // DEBUG_PRINT(ec.get_name()); DEBUG_PRINT(": ");
-        // if(reading_succeeded(ec) == true){
-        //   DEBUG_PRINTLN(ec.get_last_received_reading(), 2);
-        // }
+        // DEBUG_PRINTLN(ec.get_last_received_reading(), 2);
 
         // Next collect: +5 min
         next_poll_time =  millis() + loop_delay;    // update the time for the next reading loop
@@ -284,7 +263,40 @@ void loop()
 // ---------------------------------------------
 // pH Probe Calibration
 // ---------------------------------------------
-void ph_mid_probe(){
+void ph_probe_calibration(){
+  int i;
+
+  digitalWrite(LED, HIGH);
+  delay(20000);
+  digitalWrite(LED, LOW);
+  delay(10000);
+  digitalWrite(LED, HIGH);
+
+  ph_mid_point(); // pH = 7
+
+  digitalWrite(LED, LOW);
+  delay(10000);
+  digitalWrite(LED, HIGH);
+  delay(20000);
+  digitalWrite(LED, LOW);
+  delay(10000);
+  digitalWrite(LED, HIGH);
+
+  ph_low_point(); // pH = 4
+
+  digitalWrite(LED, LOW);
+  delay(10000);
+
+  // Signal: end of calibration phase
+  for(i=0; i<5; i++){
+    digitalWrite(LED, HIGH);
+    delay(1000);
+    digitalWrite(LED, LOW);
+    delay(1000);
+  }
+}
+
+void ph_mid_point(){
   uint8_t ph_readings = 0;
   float ph_value = 0, old_ph_value = 0;
   bool calibrated = false;
@@ -307,7 +319,7 @@ void ph_mid_probe(){
     }
     old_ph_value = ph_value;
 
-    // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,mid,7
+    // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,mid,value
     if(ph_readings > 3){
       ph.send_cmd_with_num("cal,mid,", 7.00);
       delay(1000);
@@ -316,7 +328,7 @@ void ph_mid_probe(){
     }
   }
 
-  // Calibrated ?
+  // Calibrated
   ph.send_read_cmd();
   delay(1000);
   ph.receive_read_cmd();
@@ -325,7 +337,7 @@ void ph_mid_probe(){
   return;
 }
 
-void ph_low_probe(){
+void ph_low_point(){
 
   uint8_t ph_readings = 0;
   float ph_value = 0, old_ph_value = 0;
@@ -349,7 +361,7 @@ void ph_low_probe(){
     }
     old_ph_value = ph_value;
 
-    // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,low,4
+    // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
     if(ph_readings > 3){
       ph.send_cmd_with_num("cal,low,", 4.00);
       delay(1000);
@@ -358,12 +370,130 @@ void ph_low_probe(){
     }
   }
 
-  // Calibrated ?
+  // Calibrated
   ph.send_read_cmd();
   delay(1000);
   ph.receive_read_cmd();
   DEBUG_PRINTLN(ph.get_last_received_reading());
 
+  return;
+}
+
+// ---------------------------------------------
+// EC Probe Calibration
+// ---------------------------------------------
+void ec_probe_calibration(){
+  int i;
+
+  digitalWrite(LED, HIGH);
+  delay(5000);
+  digitalWrite(LED, LOW);
+  delay(5000);
+  digitalWrite(LED, HIGH);
+
+  // Dry calibration
+  ec.send_cmd("cal,dry");
+  delay(5000);
+
+  digitalWrite(LED, LOW);
+  delay(5000);
+  digitalWrite(LED, HIGH);
+  delay(20000);
+  digitalWrite(LED, LOW);
+  delay(10000);
+  digitalWrite(LED, HIGH);
+
+  ec_low_point(); //
+
+  digitalWrite(LED, LOW);
+  delay(5000);
+  digitalWrite(LED, HIGH);
+  delay(20000);
+  digitalWrite(LED, LOW);
+  delay(10000);
+  digitalWrite(LED, HIGH);
+
+  ec_high_point(); //
+
+  digitalWrite(LED, LOW);
+  delay(5000);
+
+  // Signal: end of calibration phase
+  for(i=0; i<5; i++){
+    digitalWrite(LED, HIGH);
+    delay(1000);
+    digitalWrite(LED, LOW);
+    delay(1000);
+  }
+}
+
+void ec_low_point(){
+
+  uint8_t ec_readings = 0;
+  float ec_value = 0, old_ec_value = 0;
+  bool calibrated = false;
+
+  DEBUG_PRINTLN("Calibrating probe...");
+  while(!calibrated){
+    // 1. Continuous readings
+    ec.send_read_cmd();
+    delay(1000);
+    ec.receive_read_cmd();
+    ec_value = ec.get_last_received_reading();
+
+    DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 2);
+    if(ec_value == old_ec_value) {
+      DEBUG_PRINT("EC readings: "); DEBUG_PRINTLN(ec_readings);
+      ec_readings++;
+    }
+    else{
+      ec_readings = 0;
+    }
+    old_ec_value = ec_value;
+
+    // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
+    if(ec_readings > 3){
+      ec.send_cmd_with_num("cal,low,", 12880);
+      delay(1000);
+      calibrated = true;
+      DEBUG_PRINTLN("EC Calibrated!");
+    }
+  }
+  return;
+}
+
+void ec_high_point(){
+
+  uint8_t ec_readings = 0;
+  float ec_value = 0, old_ec_value = 0;
+  bool calibrated = false;
+
+  DEBUG_PRINTLN("Calibrating probe...");
+  while(!calibrated){
+    // 1. Continuous readings
+    ec.send_read_cmd();
+    delay(1000);
+    ec.receive_read_cmd();
+    ec_value = ec.get_last_received_reading();
+
+    DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 2);
+    if(ec_value == old_ec_value) {
+      DEBUG_PRINT("EC readings: "); DEBUG_PRINTLN(ec_readings);
+      ec_readings++;
+    }
+    else{
+      ec_readings = 0;
+    }
+    old_ec_value = ec_value;
+
+    // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,high,value
+    if(ec_readings > 3){
+      ec.send_cmd_with_num("cal,high,", 80000);
+      delay(1000);
+      calibrated = true;
+      DEBUG_PRINTLN("EC Calibrated!");
+    }
+  }
   return;
 }
 
