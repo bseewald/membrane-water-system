@@ -307,9 +307,9 @@ void ph_mid_point(){
     ph.send_read_cmd();
     delay(1000);
     ph.receive_read_cmd();
-    ph_value = ph.get_last_received_reading();
+    ph_value = round(ph.get_last_received_reading() * 100)/100;
 
-    DEBUG_PRINT("pH: "); DEBUG_PRINTLN(ph_value, 2);
+    DEBUG_PRINT("pH: "); DEBUG_PRINTLN(ph_value, 4);
     if(ph_value == old_ph_value) {
       DEBUG_PRINT("pH readings: "); DEBUG_PRINTLN(ph_readings);
       ph_readings++;
@@ -347,11 +347,11 @@ void ph_low_point(){
   while(!calibrated){
     // 1. Continuous readings
     ph.send_read_cmd();
-    delay(1000);
+    delay(2000);
     ph.receive_read_cmd();
-    ph_value = ph.get_last_received_reading();
+    ph_value = round(ph.get_last_received_reading() * 100)/100;
 
-    DEBUG_PRINT("pH: "); DEBUG_PRINTLN(ph_value, 2);
+    DEBUG_PRINT("pH: "); DEBUG_PRINTLN(ph_value, 4);
     if(ph_value == old_ph_value) {
       DEBUG_PRINT("pH readings: "); DEBUG_PRINTLN(ph_readings);
       ph_readings++;
@@ -453,7 +453,7 @@ void ec_low_point(){
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
     if(ec_readings > 3){
-      ec.send_cmd_with_num("cal,low,", 12880);
+      ec.send_cmd_with_num("cal,low,", 1413);
       delay(1000);
       calibrated = true;
       DEBUG_PRINTLN("EC Calibrated!");
@@ -488,7 +488,7 @@ void ec_high_point(){
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,high,value
     if(ec_readings > 3){
-      ec.send_cmd_with_num("cal,high,", 80000);
+      ec.send_cmd_with_num("cal,high,", 12880);
       delay(1000);
       calibrated = true;
       DEBUG_PRINTLN("EC Calibrated!");
