@@ -26,12 +26,14 @@
 #include <WiFiUdp.h>
 #include <RTClib.h>
 #include <SPI.h>
+#include <EEPROM.h>
 #include "FS.h"
 #include "SD.h"
 
 // ---------------------------------------------
 // Debug options
 // ---------------------------------------------
+// Comment line below to turn off debug mode
 #define DEBUG
 
 #ifdef DEBUG
@@ -93,6 +95,12 @@ NTPClient time_client(ntp_udp);
 #define SD_CS 5
 
 // ---------------------------------------------
+// EEPROM
+// ---------------------------------------------
+#define EEPROM_SIZE 1
+int day_of_the_week_eeprom = 0;
+
+// ---------------------------------------------
 // Variables
 // ---------------------------------------------
 enum reading_step {REQUEST, READ};
@@ -101,7 +109,7 @@ enum reading_step current_step = REQUEST;
 unsigned long next_poll_time = 0;
 const unsigned long reading_delay = 1000;     // how long we wait to receive a response, in milliseconds
 const unsigned long loop_delay = 300000;      // collect loop time: 5min
-// const unsigned long loop_delay = 120000;       // testing
+// const unsigned long loop_delay = 120000;       // TODO: testing loop time -> 2min
 
 
 void setup()
@@ -122,6 +130,9 @@ void setup()
 
   // I2C
   Wire.begin();
+
+  // EEPROM with predefined size
+  EEPROM.begin(EEPROM_SIZE);
 
   int i;
 
@@ -164,15 +175,16 @@ void setup()
   time_client.setTimeOffset(-10800);  // GMT +1 = 3600 / GMT -1 = -3600
 
   // RTC
+  DEBUG_PRINTLN("RTC");
   if (!rtc.begin()) {
     DEBUG_PRINTLN("Couldn't find RTC");
     while (1);
   }
   RTC_Valid();
 
-  // Calibration phase
-  ph_probe_calibration();
-  ec_probe_calibration();
+  // Calibration pH and ec
+  DEBUG_PRINTLN("Calibration");
+  calibration_phase();
 }
 
 void loop()
@@ -249,8 +261,7 @@ void loop()
                     String(feed),
                     String(permeate),
                     String(ph.get_last_received_reading(), 2),
-                    "0.0");
-                    // TODO: String(ec.get_last_received_reading(), 2)
+                    String(ec.get_last_received_reading(), 2));
 
         // LED OFF
         delay(5000);
@@ -258,6 +269,32 @@ void loop()
       }
       break;
   }
+}
+
+
+// ---------------------------------------------
+// Calibration Phase
+// ---------------------------------------------
+void calibration_phase(){
+
+  // Read rtc
+  DateTime now = rtc.now();
+  int day_of_the_week_rtc = now.dayOfTheWeek();
+  DEBUG_PRINT("Day of the week rtc: "); DEBUG_PRINTLN(day_of_the_week_rtc);
+
+  // Read eeprom
+  day_of_the_week_eeprom = EEPROM.read(0);
+  DEBUG_PRINT("Day of the week eeprom: "); DEBUG_PRINTLN(day_of_the_week_eeprom);
+
+  // Should calibrate every Wednesday
+  if (day_of_the_week_rtc == day_of_the_week_eeprom){
+    ph_probe_calibration();
+    ec_probe_calibration();
+  }
+
+  // Only on the first time
+  // EEPROM.write(0, 3); // 0 - Sunday, 1 - Monday, ...
+  // EEPROM.commit();
 }
 
 // ---------------------------------------------
@@ -307,7 +344,7 @@ void ph_mid_point(){
     ph.send_read_cmd();
     delay(1000);
     ph.receive_read_cmd();
-    ph_value = round(ph.get_last_received_reading() * 100)/100;
+    ph_value = round(ph.get_last_received_reading() * 10)/10;
 
     DEBUG_PRINT("pH: "); DEBUG_PRINTLN(ph_value, 4);
     if(ph_value == old_ph_value) {
@@ -349,7 +386,7 @@ void ph_low_point(){
     ph.send_read_cmd();
     delay(2000);
     ph.receive_read_cmd();
-    ph_value = round(ph.get_last_received_reading() * 100)/100;
+    ph_value = round(ph.get_last_received_reading() * 10)/10;
 
     DEBUG_PRINT("pH: "); DEBUG_PRINTLN(ph_value, 4);
     if(ph_value == old_ph_value) {
