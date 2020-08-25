@@ -20,6 +20,9 @@
 #include <WiFi.h>
 #include <Ezo_i2c.h>
 #include <OneWire.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <DallasTemperature.h>
 #include <HardwareSerial.h>
 #include <NTPClient.h>
@@ -101,6 +104,14 @@ NTPClient time_client(ntp_udp);
 int day_of_the_week_eeprom = 0;
 
 // ---------------------------------------------
+// Oled Screen
+// ---------------------------------------------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 32
+#define OLED_RESET     4
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// ---------------------------------------------
 // Variables
 // ---------------------------------------------
 enum reading_step {REQUEST, READ};
@@ -174,6 +185,14 @@ void setup()
   time_client.begin();
   time_client.setTimeOffset(-10800);  // GMT +1 = 3600 / GMT -1 = -3600
 
+  // OLED Screen
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
+    DEBUG_PRINTLN("SSD1306 allocation failed");
+  }
+  else{
+    display_initial_message();
+  }
+
   // RTC
   DEBUG_PRINTLN("RTC");
   if (!rtc.begin()) {
@@ -199,6 +218,8 @@ void loop()
         // --------------------------------------------------------------
         // Send the command to get balance, temperature, pH and EC values
         // --------------------------------------------------------------
+        display_message("Lendo sensores");
+
         temp_sensors.requestTemperatures();
 
         ph.send_read_cmd();
@@ -266,9 +287,40 @@ void loop()
         // LED OFF
         delay(5000);
         digitalWrite(LED, LOW);
+        display_message("Aguardando leitura...");
       }
       break;
   }
+}
+
+
+
+// ---------------------------------------------
+// Display Messages
+// ---------------------------------------------
+void display_initial_message()
+{
+  display.display();
+  delay(2000);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(F("SISTEMA MD v1.0"));
+  display.display();
+  delay(2000);
+}
+
+void display_message(String message){
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(message);
+  display.display();
+  delay(2000);
 }
 
 
@@ -288,6 +340,7 @@ void calibration_phase(){
 
   // Should calibrate every Wednesday
   if (day_of_the_week_rtc == day_of_the_week_eeprom){
+    display_message("Modo Calibracao");
     ph_probe_calibration();
     ec_probe_calibration();
   }
@@ -303,6 +356,7 @@ void calibration_phase(){
 void ph_probe_calibration(){
   int i;
 
+  display_message("Calibracao pHmetro");
   digitalWrite(LED, HIGH);
   delay(20000);
   digitalWrite(LED, LOW);
@@ -337,7 +391,9 @@ void ph_mid_point(){
   uint8_t ph_readings = 0;
   float ph_value = 0, old_ph_value = 0;
   bool calibrated = false;
+  String buf;
 
+  display_message("Calibracao pH 7");
   DEBUG_PRINTLN("Calibrating probe...");
   while(!calibrated){
     // 1. Continuous readings
@@ -358,6 +414,8 @@ void ph_mid_point(){
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,mid,value
     if(ph_readings > 3){
+      buf += "pH: " + String(ph_value);
+      display_message(buf);
       ph.send_cmd_with_num("cal,mid,", 7.00);
       delay(1000);
       calibrated = true;
@@ -379,8 +437,10 @@ void ph_low_point(){
   uint8_t ph_readings = 0;
   float ph_value = 0, old_ph_value = 0;
   bool calibrated = false;
+  String buf;
 
   DEBUG_PRINTLN("Calibrating probe...");
+  display_message("Calibracao pH 4");
   while(!calibrated){
     // 1. Continuous readings
     ph.send_read_cmd();
@@ -400,6 +460,8 @@ void ph_low_point(){
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
     if(ph_readings > 3){
+      buf += "pH: " + String(ph_value);
+      display_message(buf);
       ph.send_cmd_with_num("cal,low,", 4.00);
       delay(1000);
       calibrated = true;
@@ -422,6 +484,7 @@ void ph_low_point(){
 void ec_probe_calibration(){
   int i;
 
+  display_message("Calibracao condutivimetro");
   digitalWrite(LED, HIGH);
   delay(5000);
   digitalWrite(LED, LOW);
@@ -429,6 +492,7 @@ void ec_probe_calibration(){
   digitalWrite(LED, HIGH);
 
   // Dry calibration
+  display_message("Calibracao seca");
   ec.send_cmd("cal,dry");
   delay(5000);
 
@@ -469,8 +533,10 @@ void ec_low_point(){
   uint8_t ec_readings = 0;
   float ec_value = 0, old_ec_value = 0;
   bool calibrated = false;
+  String buf;
 
   DEBUG_PRINTLN("Calibrating probe...");
+  display_message("Calibracao 1413uS");
   while(!calibrated){
     // 1. Continuous readings
     ec.send_read_cmd();
@@ -490,6 +556,8 @@ void ec_low_point(){
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
     if(ec_readings > 3){
+      buf += "uS: " + String(ec_value);
+      display_message(buf);
       ec.send_cmd_with_num("cal,low,", 1413);
       delay(1000);
       calibrated = true;
@@ -504,8 +572,10 @@ void ec_high_point(){
   uint8_t ec_readings = 0;
   float ec_value = 0, old_ec_value = 0;
   bool calibrated = false;
+  String buf;
 
   DEBUG_PRINTLN("Calibrating probe...");
+  display_message("Calibracao 12880uS");
   while(!calibrated){
     // 1. Continuous readings
     ec.send_read_cmd();
@@ -525,6 +595,8 @@ void ec_high_point(){
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,high,value
     if(ec_readings > 3){
+      buf += "uS: " + String(ec_value);
+      display_message(buf);
       ec.send_cmd_with_num("cal,high,", 12880);
       delay(1000);
       calibrated = true;
