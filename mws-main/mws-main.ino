@@ -218,7 +218,7 @@ void loop()
         // --------------------------------------------------------------
         // Send the command to get balance, temperature, pH and EC values
         // --------------------------------------------------------------
-        display_message("Lendo sensores");
+        display_message("Lendo sensores", 2000);
 
         temp_sensors.requestTemperatures();
 
@@ -287,7 +287,11 @@ void loop()
         // LED OFF
         delay(5000);
         digitalWrite(LED, LOW);
-        display_message("Aguardando leitura...");
+
+        // Values on screen
+        String _values = String(_time) + "," + String(weighing) + "," + String(feed) + "," + String(permeate) + "," + String(ph.get_last_received_reading(), 2) + "," + String(ec.get_last_received_reading(), 2);
+        display_message(_values, 10000);
+        display_message("Aguardando proxima leitura...", 2000);
       }
       break;
   }
@@ -312,7 +316,7 @@ void display_initial_message()
   delay(2000);
 }
 
-void display_message(String message){
+void display_message(String message, int delay_value){
 
   display.clearDisplay();
   display.setTextSize(1);
@@ -320,7 +324,7 @@ void display_message(String message){
   display.setCursor(0, 0);
   display.println(message);
   display.display();
-  delay(2000);
+  delay(delay_value);
 }
 
 
@@ -340,7 +344,7 @@ void calibration_phase(){
 
   // Should calibrate every Wednesday
   if (day_of_the_week_rtc == day_of_the_week_eeprom){
-    display_message("Modo Calibracao");
+    display_message("Modo Calibracao", 2000);
     ph_probe_calibration();
     ec_probe_calibration();
   }
@@ -356,7 +360,7 @@ void calibration_phase(){
 void ph_probe_calibration(){
   int i;
 
-  display_message("Calibracao pHmetro");
+  display_message("Calibracao pHmetro", 2000);
   digitalWrite(LED, HIGH);
   delay(20000);
   digitalWrite(LED, LOW);
@@ -393,7 +397,7 @@ void ph_mid_point(){
   bool calibrated = false;
   String buf;
 
-  display_message("Calibracao pH 7");
+  display_message("Calibracao pH 7", 2000);
   DEBUG_PRINTLN("Calibrating probe...");
   while(!calibrated){
     // 1. Continuous readings
@@ -415,7 +419,7 @@ void ph_mid_point(){
     // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,mid,value
     if(ph_readings > 3){
       buf += "pH: " + String(ph_value);
-      display_message(buf);
+      display_message(buf, 2000);
       ph.send_cmd_with_num("cal,mid,", 7.00);
       delay(1000);
       calibrated = true;
@@ -440,7 +444,7 @@ void ph_low_point(){
   String buf;
 
   DEBUG_PRINTLN("Calibrating probe...");
-  display_message("Calibracao pH 4");
+  display_message("Calibracao pH 4", 2000);
   while(!calibrated){
     // 1. Continuous readings
     ph.send_read_cmd();
@@ -461,7 +465,7 @@ void ph_low_point(){
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
     if(ph_readings > 3){
       buf += "pH: " + String(ph_value);
-      display_message(buf);
+      display_message(buf, 2000);
       ph.send_cmd_with_num("cal,low,", 4.00);
       delay(1000);
       calibrated = true;
@@ -484,7 +488,7 @@ void ph_low_point(){
 void ec_probe_calibration(){
   int i;
 
-  display_message("Calibracao condutivimetro");
+  display_message("Calibracao condutivimetro", 2000);
   digitalWrite(LED, HIGH);
   delay(5000);
   digitalWrite(LED, LOW);
@@ -492,7 +496,7 @@ void ec_probe_calibration(){
   digitalWrite(LED, HIGH);
 
   // Dry calibration
-  display_message("Calibracao seca");
+  display_message("Calibracao seca", 2000);
   ec.send_cmd("cal,dry");
   delay(5000);
 
@@ -504,7 +508,7 @@ void ec_probe_calibration(){
   delay(10000);
   digitalWrite(LED, HIGH);
 
-  ec_low_point(); //
+  ec_low_point(); // 1413 uS
 
   digitalWrite(LED, LOW);
   delay(5000);
@@ -514,7 +518,7 @@ void ec_probe_calibration(){
   delay(10000);
   digitalWrite(LED, HIGH);
 
-  ec_high_point(); //
+  ec_high_point(); // 12880 uS
 
   digitalWrite(LED, LOW);
   delay(5000);
@@ -536,7 +540,7 @@ void ec_low_point(){
   String buf;
 
   DEBUG_PRINTLN("Calibrating probe...");
-  display_message("Calibracao 1413uS");
+  display_message("Calibracao 1413 uS", 2000);
   while(!calibrated){
     // 1. Continuous readings
     ec.send_read_cmd();
@@ -557,7 +561,7 @@ void ec_low_point(){
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
     if(ec_readings > 3){
       buf += "uS: " + String(ec_value);
-      display_message(buf);
+      display_message(buf, 2000);
       ec.send_cmd_with_num("cal,low,", 1413);
       delay(1000);
       calibrated = true;
@@ -575,7 +579,7 @@ void ec_high_point(){
   String buf;
 
   DEBUG_PRINTLN("Calibrating probe...");
-  display_message("Calibracao 12880uS");
+  display_message("Calibracao 12880 uS", 2000);
   while(!calibrated){
     // 1. Continuous readings
     ec.send_read_cmd();
@@ -596,7 +600,7 @@ void ec_high_point(){
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,high,value
     if(ec_readings > 3){
       buf += "uS: " + String(ec_value);
-      display_message(buf);
+      display_message(buf, 2000);
       ec.send_cmd_with_num("cal,high,", 12880);
       delay(1000);
       calibrated = true;
