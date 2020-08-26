@@ -344,7 +344,7 @@ void calibration_phase(){
 
   // Should calibrate every Wednesday
   if (day_of_the_week_rtc == day_of_the_week_eeprom){
-    display_message("Modo Calibracao", 2000);
+    display_message("Modo Calibracao", 5000);
     ph_probe_calibration();
     ec_probe_calibration();
   }
@@ -419,11 +419,12 @@ void ph_mid_point(){
     // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,mid,value
     if(ph_readings > 3){
       buf += "pH: " + String(ph_value);
-      display_message(buf, 2000);
+      display_message(buf, 5000);
       ph.send_cmd_with_num("cal,mid,", 7.00);
       delay(1000);
       calibrated = true;
       DEBUG_PRINTLN("pH Calibrated!");
+      display_message("pH 7 calibrado", 5000);
     }
   }
 
@@ -465,11 +466,12 @@ void ph_low_point(){
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
     if(ph_readings > 3){
       buf += "pH: " + String(ph_value);
-      display_message(buf, 2000);
+      display_message(buf, 5000);
       ph.send_cmd_with_num("cal,low,", 4.00);
       delay(1000);
       calibrated = true;
       DEBUG_PRINTLN("pH Calibrated!");
+      display_message("pH 4 calibrado", 5000);
     }
   }
 
@@ -561,11 +563,12 @@ void ec_low_point(){
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
     if(ec_readings > 3){
       buf += "uS: " + String(ec_value);
-      display_message(buf, 2000);
+      display_message(buf, 5000);
       ec.send_cmd_with_num("cal,low,", 1413);
       delay(1000);
       calibrated = true;
       DEBUG_PRINTLN("EC Calibrated!");
+      display_message("uS baixo calibrado", 5000);
     }
   }
   return;
@@ -600,11 +603,12 @@ void ec_high_point(){
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,high,value
     if(ec_readings > 3){
       buf += "uS: " + String(ec_value);
-      display_message(buf, 2000);
+      display_message(buf, 5000);
       ec.send_cmd_with_num("cal,high,", 12880);
       delay(1000);
       calibrated = true;
       DEBUG_PRINTLN("EC Calibrated!");
+      display_message("uS alto calibrado", 5000);
     }
   }
   return;
