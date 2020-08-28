@@ -145,6 +145,15 @@ void setup()
   // EEPROM with predefined size
   EEPROM.begin(EEPROM_SIZE);
 
+  delay(10000);
+  // OLED Screen
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
+    DEBUG_PRINTLN("SSD1306 allocation failed");
+  }
+  else{
+    display_initial_message();
+  }
+
   int i;
 
   // Initialize SD card
@@ -157,6 +166,7 @@ void setup()
       digitalWrite(LED, LOW);
       delay(1000);
     }
+    display_message("SD nao reconhecido", 5000);
     DEBUG_PRINTLN("Card Mount Failed");
   }
 
@@ -170,6 +180,7 @@ void setup()
       digitalWrite(LED, LOW);
       delay(1000);
     }
+    display_message("Sem cartao SD", 5000);
     DEBUG_PRINTLN("No SD card attached");
   }
 
@@ -185,14 +196,6 @@ void setup()
   time_client.begin();
   time_client.setTimeOffset(-10800);  // GMT +1 = 3600 / GMT -1 = -3600
 
-  // OLED Screen
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
-    DEBUG_PRINTLN("SSD1306 allocation failed");
-  }
-  else{
-    display_initial_message();
-  }
-
   // RTC
   DEBUG_PRINTLN("RTC");
   if (!rtc.begin()) {
@@ -200,10 +203,13 @@ void setup()
     while (1);
   }
   RTC_Valid();
-
+  
   // Calibration pH and ec
   DEBUG_PRINTLN("Calibration");
   calibration_phase();
+
+  // Initial setup OK
+  display_message("Inicializacao OK", 10000);
 }
 
 void loop()
@@ -260,10 +266,6 @@ void loop()
         // sensors
         ph.receive_read_cmd();
         ec.receive_read_cmd();
-
-        // TODO: test EC
-        // DEBUG_PRINT(ec.get_name()); DEBUG_PRINT(": ");
-        // DEBUG_PRINTLN(ec.get_last_received_reading(), 2);
 
         // Next collect: +5 min
         next_poll_time =  millis() + loop_delay;    // update the time for the next reading loop
@@ -510,7 +512,7 @@ void ec_probe_calibration(){
   delay(10000);
   digitalWrite(LED, HIGH);
 
-  ec_low_point(); // 1413 uS
+  ec_low_point(); // 100 uS
 
   digitalWrite(LED, LOW);
   delay(5000);
@@ -520,7 +522,7 @@ void ec_probe_calibration(){
   delay(10000);
   digitalWrite(LED, HIGH);
 
-  ec_high_point(); // 12880 uS
+  ec_high_point(); // 1413 uS
 
   digitalWrite(LED, LOW);
   delay(5000);
@@ -535,6 +537,46 @@ void ec_probe_calibration(){
 }
 
 void ec_low_point(){
+
+  uint8_t ec_readings = 0;
+  float ec_value = 0, old_ec_value = 0;
+  bool calibrated = false;
+  String buf;
+
+  DEBUG_PRINTLN("Calibrating probe...");
+  display_message("Calibracao 100 uS", 2000);
+  while(!calibrated){
+    // 1. Continuous readings
+    ec.send_read_cmd();
+    delay(1000);
+    ec.receive_read_cmd();
+    ec_value = ec.get_last_received_reading();
+
+    DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 2);
+    if(ec_value == old_ec_value) {
+      DEBUG_PRINT("EC readings: "); DEBUG_PRINTLN(ec_readings);
+      ec_readings++;
+    }
+    else{
+      ec_readings = 0;
+    }
+    old_ec_value = ec_value;
+
+    // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
+    if(ec_readings > 3){
+      buf += "uS: " + String(ec_value);
+      display_message(buf, 5000);
+      ec.send_cmd_with_num("cal,low,", 100);
+      delay(1000);
+      calibrated = true;
+      DEBUG_PRINTLN("EC Calibrated!");
+      display_message("uS baixo calibrado", 5000);
+    }
+  }
+  return;
+}
+
+void ec_high_point(){
 
   uint8_t ec_readings = 0;
   float ec_value = 0, old_ec_value = 0;
@@ -560,51 +602,11 @@ void ec_low_point(){
     }
     old_ec_value = ec_value;
 
-    // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
-    if(ec_readings > 3){
-      buf += "uS: " + String(ec_value);
-      display_message(buf, 5000);
-      ec.send_cmd_with_num("cal,low,", 1413);
-      delay(1000);
-      calibrated = true;
-      DEBUG_PRINTLN("EC Calibrated!");
-      display_message("uS baixo calibrado", 5000);
-    }
-  }
-  return;
-}
-
-void ec_high_point(){
-
-  uint8_t ec_readings = 0;
-  float ec_value = 0, old_ec_value = 0;
-  bool calibrated = false;
-  String buf;
-
-  DEBUG_PRINTLN("Calibrating probe...");
-  display_message("Calibracao 12880 uS", 2000);
-  while(!calibrated){
-    // 1. Continuous readings
-    ec.send_read_cmd();
-    delay(1000);
-    ec.receive_read_cmd();
-    ec_value = ec.get_last_received_reading();
-
-    DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 2);
-    if(ec_value == old_ec_value) {
-      DEBUG_PRINT("EC readings: "); DEBUG_PRINTLN(ec_readings);
-      ec_readings++;
-    }
-    else{
-      ec_readings = 0;
-    }
-    old_ec_value = ec_value;
-
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,high,value
     if(ec_readings > 3){
       buf += "uS: " + String(ec_value);
       display_message(buf, 5000);
-      ec.send_cmd_with_num("cal,high,", 12880);
+      ec.send_cmd_with_num("cal,high,", 1413);
       delay(1000);
       calibrated = true;
       DEBUG_PRINTLN("EC Calibrated!");
