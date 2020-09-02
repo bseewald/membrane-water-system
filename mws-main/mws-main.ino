@@ -203,7 +203,9 @@ void setup()
     while (1);
   }
   RTC_Valid();
-  
+  String _timestamp = "Hora agora: " + get_timestamp();
+  display_message(_timestamp, 5000);
+
   // Calibration pH and ec
   DEBUG_PRINTLN("Calibration");
   calibration_phase();
