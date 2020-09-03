@@ -286,14 +286,14 @@ void loop()
                     String(feed),
                     String(permeate),
                     String(ph.get_last_received_reading(), 2),
-                    String(ec.get_last_received_reading(), 2));
+                    String(ec.get_last_received_reading(), 0));
 
         // LED OFF
         delay(5000);
         digitalWrite(LED, LOW);
 
         // Values on screen
-        String _values = String(_time) + "," + String(weighing) + "," + String(feed) + "," + String(permeate) + "," + String(ph.get_last_received_reading(), 2) + "," + String(ec.get_last_received_reading(), 2);
+        String _values = String(_time) + "," + String(weighing) + "," + String(feed) + "," + String(permeate) + "," + String(ph.get_last_received_reading(), 2) + "," + String(ec.get_last_received_reading(), 0);
         display_message(_values, 10000);
         display_message("Aguardando proxima leitura...", 2000);
       }
@@ -350,12 +350,13 @@ void calibration_phase(){
   if (day_of_the_week_rtc == day_of_the_week_eeprom){
     display_message("Modo Calibracao", 5000);
     ph_probe_calibration();
-    ec_probe_calibration();
+    // TODO: sensor with problem ?
+    //ec_probe_calibration();
   }
 
   // Only on the first time
-  // EEPROM.write(0, 3); // 0 - Sunday, 1 - Monday, ...
-  // EEPROM.commit();
+  //EEPROM.write(0, 3); // 0 - Sunday, 1 - Monday, ...
+  //EEPROM.commit();
 }
 
 // ---------------------------------------------
@@ -503,8 +504,9 @@ void ec_probe_calibration(){
 
   // Dry calibration
   display_message("Calibracao seca", 2000);
-  ec.send_cmd("cal,dry");
+  ec.send_cmd("Cal,dry");
   delay(5000);
+  display_message("Calibracao seca concluida", 5000);
 
   digitalWrite(LED, LOW);
   delay(5000);
@@ -554,7 +556,7 @@ void ec_low_point(){
     ec.receive_read_cmd();
     ec_value = ec.get_last_received_reading();
 
-    DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 2);
+    DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 0);
     if(ec_value == old_ec_value) {
       DEBUG_PRINT("EC readings: "); DEBUG_PRINTLN(ec_readings);
       ec_readings++;
@@ -565,15 +567,15 @@ void ec_low_point(){
     old_ec_value = ec_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
-    if(ec_readings > 3){
-      buf += "uS: " + String(ec_value);
-      display_message(buf, 5000);
-      ec.send_cmd_with_num("cal,low,", 100);
-      delay(1000);
-      calibrated = true;
-      DEBUG_PRINTLN("EC Calibrated!");
-      display_message("uS baixo calibrado", 5000);
-    }
+   if(ec_readings > 3){
+     buf += "uS: " + String(ec_value);
+     display_message(buf, 5000);
+     ec.send_cmd_with_num("cal,low,", 100);
+     delay(1000);
+     calibrated = true;
+     DEBUG_PRINTLN("EC Calibrated!");
+     display_message("uS baixo calibrado", 5000);
+   }
   }
   return;
 }
@@ -594,7 +596,7 @@ void ec_high_point(){
     ec.receive_read_cmd();
     ec_value = ec.get_last_received_reading();
 
-    DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 2);
+    DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 0);
     if(ec_value == old_ec_value) {
       DEBUG_PRINT("EC readings: "); DEBUG_PRINTLN(ec_readings);
       ec_readings++;
