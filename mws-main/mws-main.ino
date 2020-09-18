@@ -59,6 +59,8 @@ const char* password = "2020projetoautoFL";
 Ezo_board ph = Ezo_board(99, "PH");
 Ezo_board ec = Ezo_board(100, "EC");
 
+#define MAX 4
+
 // ---------------------------------------------
 // UART 2 PINS
 // ---------------------------------------------
@@ -120,7 +122,6 @@ enum reading_step current_step = REQUEST;
 unsigned long next_poll_time = 0;
 const unsigned long reading_delay = 1000;     // how long we wait to receive a response, in milliseconds
 const unsigned long loop_delay = 300000;      // collect loop time: 5min
-// const unsigned long loop_delay = 120000;       // TODO: testing loop time -> 2min
 
 
 void setup()
@@ -350,8 +351,7 @@ void calibration_phase(){
   if (day_of_the_week_rtc == day_of_the_week_eeprom){
     display_message("Modo Calibracao", 5000);
     ph_probe_calibration();
-    // TODO: sensor with problem ?
-    //ec_probe_calibration();
+    ec_probe_calibration();
   }
 
   // Only on the first time
@@ -422,7 +422,7 @@ void ph_mid_point(){
     old_ph_value = ph_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,mid,value
-    if(ph_readings > 3){
+    if(ph_readings > MAX){
       buf += "pH: " + String(ph_value);
       display_message(buf, 5000);
       ph.send_cmd_with_num("cal,mid,", 7.00);
@@ -469,7 +469,7 @@ void ph_low_point(){
     old_ph_value = ph_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
-    if(ph_readings > 3){
+    if(ph_readings > MAX){
       buf += "pH: " + String(ph_value);
       display_message(buf, 5000);
       ph.send_cmd_with_num("cal,low,", 4.00);
@@ -557,8 +557,10 @@ void ec_low_point(){
     ec_value = ec.get_last_received_reading();
 
     DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 0);
+    delay(1000);
     if(ec_value == old_ec_value) {
       DEBUG_PRINT("EC readings: "); DEBUG_PRINTLN(ec_readings);
+      delay(1000);
       ec_readings++;
     }
     else{
@@ -567,7 +569,7 @@ void ec_low_point(){
     old_ec_value = ec_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
-   if(ec_readings > 3){
+   if(ec_readings > MAX){
      buf += "uS: " + String(ec_value);
      display_message(buf, 5000);
      ec.send_cmd_with_num("cal,low,", 100);
@@ -597,8 +599,10 @@ void ec_high_point(){
     ec_value = ec.get_last_received_reading();
 
     DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 0);
+    delay(1000);
     if(ec_value == old_ec_value) {
       DEBUG_PRINT("EC readings: "); DEBUG_PRINTLN(ec_readings);
+      delay(1000);
       ec_readings++;
     }
     else{
@@ -607,7 +611,7 @@ void ec_high_point(){
     old_ec_value = ec_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,high,value
-    if(ec_readings > 3){
+    if(ec_readings > MAX){
       buf += "uS: " + String(ec_value);
       display_message(buf, 5000);
       ec.send_cmd_with_num("cal,high,", 1413);
