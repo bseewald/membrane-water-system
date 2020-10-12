@@ -1,2 +1,3 @@
 # membrane-water-system
-This system reads pH, conductivity, and temperature and uploads to a cloud server
+
+Sistema automatizado para monitoramento de sistemas aquosos.
