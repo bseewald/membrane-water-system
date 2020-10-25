@@ -59,7 +59,8 @@ const char* password = "2020projetoautoFL";
 Ezo_board ph = Ezo_board(99, "PH");
 Ezo_board ec = Ezo_board(100, "EC");
 
-#define MAX 4
+#define MAX_PH 9
+#define MAX_EC 4
 
 // ---------------------------------------------
 // UART 2 PINS
@@ -467,7 +468,7 @@ void ph_mid_point(){
     old_ph_value = ph_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the mid-point calibration command cal,mid,value
-    if(ph_readings > MAX){
+    if(ph_readings > MAX_PH){
       buf += "pH: " + String(ph_value);
       display_message(buf, 5000);
       ph.send_cmd_with_num("cal,mid,", 7.00);
@@ -514,7 +515,7 @@ void ph_low_point(){
     old_ph_value = ph_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
-    if(ph_readings > MAX){
+    if(ph_readings > MAX_PH){
       buf += "pH: " + String(ph_value);
       display_message(buf, 5000);
       ph.send_cmd_with_num("cal,low,", 4.00);
@@ -599,7 +600,7 @@ void ec_low_point(){
     ec.send_read_cmd();
     delay(1000);
     ec.receive_read_cmd();
-    ec_value = ec.get_last_received_reading();
+    ec_value = round(ec.get_last_received_reading() * 10)/10;
 
     DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 0);
     delay(1000);
@@ -614,7 +615,7 @@ void ec_low_point(){
     old_ec_value = ec_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,low,value
-   if(ec_readings > MAX){
+   if(ec_readings > MAX_EC){
      buf += "uS: " + String(ec_value);
      display_message(buf, 5000);
      ec.send_cmd_with_num("cal,low,", 100);
@@ -641,7 +642,7 @@ void ec_high_point(){
     ec.send_read_cmd();
     delay(1000);
     ec.receive_read_cmd();
-    ec_value = ec.get_last_received_reading();
+    ec_value = round(ec.get_last_received_reading() * 10)/10;
 
     DEBUG_PRINT("EC: "); DEBUG_PRINTLN(ec_value, 0);
     delay(1000);
@@ -656,7 +657,7 @@ void ec_high_point(){
     old_ec_value = ec_value;
 
     // 2. Once the readings have stabilized (1-2 minutes) issue the low-point calibration command cal,high,value
-    if(ec_readings > MAX){
+    if(ec_readings > MAX_EC){
       buf += "uS: " + String(ec_value);
       display_message(buf, 5000);
       ec.send_cmd_with_num("cal,high,", 1413);
