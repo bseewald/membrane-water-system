@@ -67,7 +67,9 @@ Ezo_board ec = Ezo_board(100, "EC");
 #define RXD2 16
 #define TXD2 17
 HardwareSerial serial_balance(2);
-const uint8_t GETWEIGHT[] = { 0x50, 0x52, 0x49, 0x4E, 0x54, 0x0D }; // PRINT<CR>
+// const uint8_t GETWEIGHT[] = { 0x50, 0x52, 0x49, 0x4E, 0x54, 0x0D }; // PRINT<CR>
+String weighing;
+char c;
 
 // ---------------------------------------------
 // DS18B20 Temperature Sensor
@@ -102,8 +104,9 @@ NTPClient time_client(ntp_udp);
 // ---------------------------------------------
 // EEPROM
 // ---------------------------------------------
-#define EEPROM_SIZE 1
-int day_of_the_week_eeprom = 0;
+#define EEPROM_SIZE 2
+int ph_day_of_the_week_eeprom = 0;
+int ec_day_of_the_week_eeprom = 0;
 
 // ---------------------------------------------
 // Oled Screen
@@ -114,14 +117,23 @@ int day_of_the_week_eeprom = 0;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // ---------------------------------------------
-// Variables
+// Loop Variables
 // ---------------------------------------------
-enum reading_step {REQUEST, READ};
-enum reading_step current_step = REQUEST;
+enum reading_step {REQUEST_SENSORS, READ_SENSORS, READ_BALANCE};
+enum reading_step current_step = REQUEST_SENSORS;
 
 unsigned long next_poll_time = 0;
 const unsigned long reading_delay = 1000;     // how long we wait to receive a response, in milliseconds
-const unsigned long loop_delay = 300000;      // collect loop time: 5min
+const unsigned long loop_delay = 180000;      // collect loop time: 3min
+
+#define HOUR 0
+#define MINUTE 0
+
+String _time;
+String _values;
+DateTime now;
+float feed;
+float permeate;
 
 
 void setup()
@@ -221,69 +233,54 @@ void loop()
   // Collect info from sensors
   // ---------------------------------------------
   switch(current_step) {
-    case REQUEST:
+    case REQUEST_SENSORS:
+      // Clean buffer
+      while(serial_balance.available() > 0) {serial_balance.read();}
+
       if (millis() >= next_poll_time){
 
         // --------------------------------------------------------------
-        // Send the command to get balance, temperature, pH and EC values
+        // Send the command to get temperature, pH and EC values
         // --------------------------------------------------------------
         display_message("Lendo sensores", 2000);
 
         temp_sensors.requestTemperatures();
-
         ph.send_read_cmd();
         ec.send_read_cmd();
 
-        // PRINT<CR> ... The same operation as pressing the [PRINT] key
-        serial_balance.write(GETWEIGHT, sizeof(GETWEIGHT));
-
         // Set when the response will arrive
         next_poll_time = millis() + reading_delay;
-        current_step = READ;
+        current_step = READ_SENSORS;
       }
       break;
 
-    case READ:
+    case READ_SENSORS:
+      // Clean buffer
+      while(serial_balance.available() > 0) {serial_balance.read();}
+
       if (millis() >= next_poll_time) {
 
         // LED ON
         digitalWrite(LED, HIGH);
-
-        String _time = get_timestamp();
-
-        // BALANCE
-        String weighing = "";
-        char c;
-        while(serial_balance.available() > 0) {
-          c = char(serial_balance.read());
-          if(c != ' ' && c != '[' && c != ']' && c != 'g'){
-            weighing += c;
-          }
-        }
-        weighing.trim();
+        _time = get_timestamp();
 
         // TEMPERATURE
-        float feed = temp_sensors.getTempC(temp_sensor_feed);
-        float permeate = temp_sensors.getTempC(temp_sensor_permeate);
+        feed = temp_sensors.getTempC(temp_sensor_feed);
+        permeate = temp_sensors.getTempC(temp_sensor_permeate);
 
         // sensors
         ph.receive_read_cmd();
         ec.receive_read_cmd();
 
-        // Next collect: +5 min
-        next_poll_time =  millis() + loop_delay;    // update the time for the next reading loop
-        current_step = REQUEST;
-
         // ---------------------------------------------
         // Save in SD Card
         // ---------------------------------------------
-        DateTime now = rtc.now();
-        if(now.hour() == 0 && now.minute() > 0){
+        now = rtc.now();
+        if(now.hour() == HOUR && now.minute() > MINUTE){
           save_header_in_file();
         }
 
         save_in_file(_time,
-                    weighing,
                     String(feed),
                     String(permeate),
                     String(ph.get_last_received_reading(), 2),
@@ -294,9 +291,49 @@ void loop()
         digitalWrite(LED, LOW);
 
         // Values on screen
-        String _values = String(_time) + "," + String(weighing) + "," + String(feed) + "," + String(permeate) + "," + String(ph.get_last_received_reading(), 2) + "," + String(ec.get_last_received_reading(), 0);
+        _values = String(_time) + "," + String(feed) + "," + String(permeate) + "," + String(ph.get_last_received_reading(), 2) + "," + String(ec.get_last_received_reading(), 0);
+        display_message(_values, 10000);
+
+        next_poll_time =  millis() + reading_delay;
+        current_step = READ_BALANCE;
+      }
+      break;
+
+    case READ_BALANCE:
+      // Clean buffer
+      while(serial_balance.available() > 0) {serial_balance.read();}
+
+      if (millis() >= next_poll_time) {
+        display_message("Lendo balanca", 2000);
+
+        _time = get_timestamp();
+        weighing = "";
+        while(serial_balance.available() > 0) {
+          c = char(serial_balance.read());
+          if(c != ' ' && c != '[' && c != ']' && c != 'g' && c != 'S'){
+            weighing += c;
+          }
+        }
+        weighing.trim();
+
+        now = rtc.now();
+        if(now.hour() == HOUR && now.minute() > MINUTE){
+          save_header_weighing_in_file();
+        }
+        save_in_weighing_file(_time, weighing);
+
+        // LED OFF
+        delay(5000);
+        digitalWrite(LED, LOW);
+
+        // Values on screen
+        _values = String(_time) + "," + String(weighing);
         display_message(_values, 10000);
         display_message("Aguardando proxima leitura...", 2000);
+
+        // Next collect: +3 min
+        next_poll_time =  millis() + loop_delay;
+        current_step = REQUEST_SENSORS;
       }
       break;
   }
@@ -316,7 +353,7 @@ void display_initial_message()
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
-  display.println(F("SISTEMA MD v1.0"));
+  display.println(F("SISTEMA MD v1.1"));
   display.display();
   delay(2000);
 }
@@ -344,19 +381,27 @@ void calibration_phase(){
   DEBUG_PRINT("Day of the week rtc: "); DEBUG_PRINTLN(day_of_the_week_rtc);
 
   // Read eeprom
-  day_of_the_week_eeprom = EEPROM.read(0);
-  DEBUG_PRINT("Day of the week eeprom: "); DEBUG_PRINTLN(day_of_the_week_eeprom);
+  ph_day_of_the_week_eeprom = EEPROM.read(0);
+  ec_day_of_the_week_eeprom = EEPROM.read(1);
+  DEBUG_PRINT("Day of the week eeprom: "); DEBUG_PRINTLN(ph_day_of_the_week_eeprom);
+  DEBUG_PRINT("Day of the week eeprom: "); DEBUG_PRINTLN(ec_day_of_the_week_eeprom);
 
   // Should calibrate every Wednesday
-  if (day_of_the_week_rtc == day_of_the_week_eeprom){
-    display_message("Modo Calibracao", 5000);
+  if (day_of_the_week_rtc == ph_day_of_the_week_eeprom){
+    display_message("Modo Calibracao pH", 5000);
     ph_probe_calibration();
+  }
+
+  // Should calibrate every Friday
+  if (day_of_the_week_rtc == ec_day_of_the_week_eeprom){
+    display_message("Modo Calibracao EC", 5000);
     ec_probe_calibration();
   }
 
-  // Only on the first time
-  //EEPROM.write(0, 3); // 0 - Sunday, 1 - Monday, ...
-  //EEPROM.commit();
+  // Only once
+  // EEPROM.write(0, 3); // 0 - Sun, 1 - Mon, 2 - Tue, 3 - Wed, 4 - Thu, 5 - Fri, 6 - Sat
+  // EEPROM.write(1, 5);
+  // EEPROM.commit();
 }
 
 // ---------------------------------------------
@@ -674,13 +719,13 @@ String get_timestamp(){
 String get_datestamp(){
   DateTime now = rtc.now();
   char datestamp[11];
-  sprintf(datestamp, "%04d-%02d-%02d", now.year(), now.month(), now.day());
+  sprintf(datestamp, "%04d%02d%02d", now.year(), now.month(), now.day());
   return String(datestamp);
 }
 
 void save_header_in_file(){
-  String filename = "/" + get_datestamp() + ".csv";
-  String header = "timestamp, weighing, temp_feed, temp_permeate, ph, ec\n";
+  String filename = "/sensors_" + get_datestamp() + ".csv";
+  String header = "timestamp, temp_feed, temp_permeate, ph, ec\n";
 
   // Create a file with header on the SD card
   File file;
@@ -703,9 +748,55 @@ void save_header_in_file(){
   return;
 }
 
-void save_in_file(String _time, String _weight, String _feed, String _permeate, String _ph, String _ec){
-  String filename = "/" + get_datestamp() + ".csv";
-  String _values = _time + "," + _weight + "," + _feed + "," + _permeate + "," + _ph + "," + _ec + "\n";
+void save_header_weighing_in_file(){
+  String filename = "/weighing_" + get_datestamp() + ".csv";
+  String header = "timestamp, weighing\n";
+
+  // Create a file with header on the SD card
+  File file;
+  File file_open = SD.open(filename);
+  if(!file_open) {
+    DEBUG_PRINTLN("Failed to open file, creating...");
+
+    file = SD.open(filename, "w");
+    if(!file){
+      DEBUG_PRINTLN("Something wrong with file.");
+      return;
+    }
+    if(file.print(header)) {
+      DEBUG_PRINT("Header saved: "); DEBUG_PRINTLN(header);
+    } else {
+      DEBUG_PRINTLN("Header not saved");
+    }
+    file.close();
+  }
+  return;
+}
+
+void save_in_file(String _time, String _feed, String _permeate, String _ph, String _ec){
+  String filename = "/sensors_" + get_datestamp() + ".csv";
+  String _values = _time + "," + _feed + "," + _permeate + "," + _ph + "," + _ec + "\n";
+
+  // Save data on the SD Card
+  File file = SD.open(filename, "a+");
+  if(!file) {
+    DEBUG_PRINTLN("Failed to open file");
+    return;
+  }
+  else {
+    if(file.print(_values)) {
+      DEBUG_PRINT("Message saved: "); DEBUG_PRINTLN(_values);
+    } else {
+      DEBUG_PRINTLN("Message not saved");
+    }
+    file.close();
+  }
+  return;
+}
+
+void save_in_weighing_file(String _time, String _weight){
+  String filename = "/weighing_" + get_datestamp() + ".csv";
+  String _values = _time + "\n" + _weight + "\n";
 
   // Save data on the SD Card
   File file = SD.open(filename, "a+");
@@ -735,7 +826,7 @@ bool reading_succeeded(Ezo_board &Sensor) {
       DEBUG_PRINTLN("Failed");
       return false;
 
-    case Ezo_board::NOT_READY:     // if the reading was taken to early, the command has not yet finished calculating
+    case Ezo_board::NOT_READY:
       DEBUG_PRINTLN("Pending");
       return false;
 
@@ -743,7 +834,7 @@ bool reading_succeeded(Ezo_board &Sensor) {
       DEBUG_PRINTLN("No Data");
       return false;
 
-    default:                      // if none of the above happened
+    default:
      return false;
   }
 }
