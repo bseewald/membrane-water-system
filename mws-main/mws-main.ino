@@ -704,21 +704,22 @@ void RTC_Update(){
 }
 
 void RTC_Valid(){
-  if(rtc.lostPower()) {
+  now = rtc.now();
+  if(rtc.lostPower() || now.hour() == 3) {
     DEBUG_PRINTLN("RTC lost power, lets set the time!");
     RTC_Update();
   }
 }
 
 String get_timestamp(){
-  DateTime now = rtc.now();
+  now = rtc.now();
   char timestamp[10];
   sprintf(timestamp, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
   return String(timestamp);
 }
 
 String get_datestamp(){
-  DateTime now = rtc.now();
+  now = rtc.now();
   char datestamp[11];
   sprintf(datestamp, "%04d%02d%02d", now.year(), now.month(), now.day());
   return String(datestamp);
